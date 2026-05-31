@@ -115,13 +115,13 @@ OPENAI_TRANSCRIBE_MODEL=gpt-4o-mini-transcribe
 OPENAI_TEXT_MODEL=gpt-5-mini
 DATABASE_URL=sqlite:///data/bot.db
 DAILY_VOICE_LIMIT=5
-MAX_VOICE_SECONDS=900
+MAX_VOICE_SECONDS=600
 DEFAULT_RESPONSE_MODE=short
 OWNER_TELEGRAM_ID=
 UNLIMITED_USER_IDS=
 ```
 
-`MAX_VOICE_SECONDS=900` означает 15 минут. Telegram voice messages обычно приходят как OGG/Opus, поэтому бот перед отправкой в OpenAI конвертирует файл в MP3 через `ffmpeg`.
+`MAX_VOICE_SECONDS=600` означает 10 минут. Telegram voice messages обычно приходят как OGG/Opus, поэтому бот перед отправкой в OpenAI конвертирует файл в MP3 через `ffmpeg`.
 
 `DEFAULT_RESPONSE_MODE` задаёт формат ответа для пользователей без личной настройки:
 
