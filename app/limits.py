@@ -1,3 +1,10 @@
+"""Legacy compatibility helpers for the old daily_usage table.
+
+The active tariff system uses UserSettings counters through app.access and
+app.access_service. Keep these helpers only while old databases still have the
+daily_usage table and until a dedicated migration removes it.
+"""
+
 from datetime import date
 
 from sqlalchemy import select
@@ -35,4 +42,3 @@ def can_process_voice(session: Session, telegram_user_id: int, daily_limit: int)
 def increment_voice_usage(session: Session, telegram_user_id: int) -> None:
     usage = get_or_create_daily_usage(session, telegram_user_id)
     usage.voice_count += 1
-

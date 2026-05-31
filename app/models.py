@@ -15,6 +15,21 @@ class DailyUsage(Base):
     voice_count: Mapped[int] = mapped_column(Integer, default=0)
 
 
+class AnalyticsEvent(Base):
+    __tablename__ = "analytics_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    event_name: Mapped[str] = mapped_column(String(80), index=True)
+    telegram_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    tariff_type: Mapped[str] = mapped_column(String(30), default="")
+    payload_json: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        index=True,
+    )
+
+
 class VoiceNote(Base):
     __tablename__ = "voice_notes"
 
@@ -47,3 +62,20 @@ class UserSettings(Base):
     response_mode: Mapped[str] = mapped_column(String(20), default="short")
     is_unlimited: Mapped[bool] = mapped_column(Boolean, default=False)
     is_premium: Mapped[bool] = mapped_column(Boolean, default=False)
+    tariff_type: Mapped[str] = mapped_column(String(30), default="free")
+    registration_date: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+    trial_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    minutes_used_total: Mapped[int] = mapped_column(Integer, default=0)
+    minutes_limit_total: Mapped[int] = mapped_column(Integer, default=15)
+    minutes_used_this_month: Mapped[int] = mapped_column(Integer, default=0)
+    minutes_limit_month: Mapped[int] = mapped_column(Integer, default=15)
+    voices_used_today: Mapped[int] = mapped_column(Integer, default=0)
+    daily_voice_limit: Mapped[int] = mapped_column(Integer, default=3)
+    usage_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    minutes_month_key: Mapped[str] = mapped_column(String(7), default="")

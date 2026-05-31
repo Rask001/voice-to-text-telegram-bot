@@ -8,6 +8,7 @@ from typing import Callable, TypeVar
 from openai import OpenAI, RateLimitError
 
 from app.config import Settings
+from app.tasks import normalize_tasks
 
 
 logger = logging.getLogger(__name__)
@@ -37,15 +38,23 @@ class OpenAIService:
         text = getattr(transcript, "text", "")
         return text.strip()
 
-    def analyze(self, transcript: str) -> dict[str, list[str] | str]:
+    def analyze(self, transcript: str) -> dict[str, object]:
         prompt = (
             "Ты помощник для обработки длинных голосовых заметок. "
-            "Верни только JSON с ключами title, summary, action_items, details, important_points. "
+            "Верни только JSON с ключами title, summary, tasks, details, important_points. "
             "title: короткий заголовок в 2-5 слов на языке пользователя, без кавычек и точки в конце. "
             "summary: очень короткое содержание на русском в 1-2 предложениях. "
             "details: 3-6 коротких предложений с полезными подробностями. "
-            "action_items и important_points: массивы строк. "
-            "Если задач нет, верни пустой массив action_items.\n\n"
+            "important_points: массив строк. "
+            "tasks: массив объектов вида {\"text\": \"Купить молоко\", \"priority\": false}. "
+            "Выведи все задачи, которые явно или косвенно перечислены в сообщении. "
+            "Не придумывай лишнее. "
+            "Если задача выделена пользователем как важная, срочная или обязательная — "
+            "пометь её как priority=true. Ориентируйся на слова и фразы: важно, "
+            "очень важно, самое главное, главное не забыть, обязательно, срочно, "
+            "не забудь, критично, в первую очередь, обязательно напомни и похожие. "
+            "Не помечай задачу важной без явного акцента. "
+            "Если задач нет, верни пустой массив tasks.\n\n"
             f"Текст расшифровки:\n{transcript}"
         )
 
@@ -70,10 +79,14 @@ class OpenAIService:
                 "important_points": [],
             }
 
+        tasks = data.get("tasks")
+        if tasks is None:
+            tasks = data.get("action_items")
+
         return {
             "title": str(data.get("title", "")).strip().strip("\"'“”«»."),
             "summary": str(data.get("summary", "")).strip(),
-            "action_items": _as_string_list(data.get("action_items")),
+            "action_items": normalize_tasks(tasks),
             "details": str(data.get("details", "")).strip(),
             "important_points": _as_string_list(data.get("important_points")),
         }
