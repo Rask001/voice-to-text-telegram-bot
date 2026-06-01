@@ -60,6 +60,9 @@ def find_ffmpeg() -> str:
     homebrew_ffmpeg = Path("/opt/homebrew/bin/ffmpeg")
     if homebrew_ffmpeg.exists():
         return str(homebrew_ffmpeg)
+    intel_homebrew_ffmpeg = Path("/usr/local/bin/ffmpeg")
+    if intel_homebrew_ffmpeg.exists():
+        return str(intel_homebrew_ffmpeg)
 
     raise RuntimeError("ffmpeg is not installed or not available in PATH")
 
