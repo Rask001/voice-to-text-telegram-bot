@@ -143,6 +143,7 @@ handlers use session_factory per operation
 - `voice_notes` — история обработок и кэш результатов;
 - `user_settings` — тариф, response mode, counters, trial/month limits;
 - `analytics_events` — локальные события использования и admin stats;
+- `reminders` — ручные и будущие task/history/AI напоминания;
 - `daily_usage` — legacy дневной счетчик, сейчас не участвует в активной проверке тарифов.
 
 SQLite schema updates сделаны простыми `ALTER TABLE` в `app/db.py`. Это не полноценная миграционная система, но достаточно для текущего MVP. Текущая схема, уже поддержанные ручные миграции и план будущего Alembic описаны в `docs/DATABASE_MIGRATIONS.md`.
@@ -273,13 +274,99 @@ note_keyboard(source="history")
 
 Нижнее меню создается `app/handlers/keyboards.py:main_keyboard()`:
 
-- `🎙 Новое голосовое`;
-- `👤 Профиль`;
-- `📚 История`;
-- `⚙️ Настройки`;
-- `❓ Помощь`.
+```text
+🎙 Голосовое | 🔔 Напомни
+👤 Профиль  | 📚 История
+⚙️ Настройки | ❓ Помощь
+```
+
+`🔔 Напомни` открывает `app/handlers/keyboards.py:reminders_menu_keyboard()`:
+
+```text
+➕ Создать | 📋 Текущие
+⬅️ Назад
+```
+
+Старые тексты `🎙 Новое голосовое`, `🔔` и `🔔 Напоминания` остаются совместимыми.
 
 `app/handlers/menu.py:reply_keyboard_handler()` маршрутизирует текст кнопки в ту же логику, что команды. Обычный текст, который не совпал с кнопкой, попадает в `app/handlers/fallbacks.py:text_fallback()`.
+
+## Поток Напоминаний
+
+Ручное создание:
+
+```text
+/remind
+↓
+handlers/reminders.py asks task text
+↓
+user sends text
+↓
+reminder_parser.py tries to parse full text
+↓
+if time found: create reminder immediately
+↓
+if no time found: ask selected button or manual text time
+↓
+reminder_service.create_reminder()
+↓
+SQLite reminders(status=pending)
+```
+
+Быстрое создание одной командой:
+
+```text
+/remind завтра 14:30 заехать в автосервис
+↓
+handlers/reminders.py reads command args
+↓
+reminder_parser.parse_reminder_request()
+↓
+reminder_service.create_reminder()
+↓
+SQLite reminders(status=pending)
+```
+
+`reminder_parser.py` не использует OpenAI. Основная точка входа — `parse_reminder_text()`, которая возвращает `success`, `task_text`, `remind_at`, `timezone`, `matched_pattern`, `error`, `needs_task`. Parser понимает разговорные русские форматы: `через минуту`, `через 10`, `через пол часа`, `через полчаса`, `минут через 15`, `через пару минут`, `через несколько часов`, `через 1 час 30 минут`, `через полтора часа`, `сегодня 18:00`, `завтра 14:30`, `завтра утром/днём/вечером/ночью`, дни недели и формат `задача в HH:MM`, например `позвонить Соне в 21:21`. Для ввода только времени: если время уже прошло сегодня, ставится завтра. `через 10` без единиц считается 10 минутами. `DEFAULT_TIMEZONE` задает часовой пояс, `DEFAULT_REMINDER_TIME` — дефолтное время для коротких сценариев вроде `завтра` или `в пятницу`.
+
+Scheduler тоже берет текущее время через `DEFAULT_TIMEZONE`, а не через системную таймзону сервера. Это сохраняет одинаковое сравнение `remind_at <= now` на локальном и серверном Mac.
+
+Список:
+
+```text
+/reminders or Reply Keyboard "📋 Текущие"
+↓
+reminder_service.get_user_reminders()
+↓
+format_reminders_list()
+↓
+inline actions: complete / snooze / cancel
+```
+
+Отправка:
+
+```text
+app/main.py
+↓
+run_reminder_scheduler()
+↓ every 30 seconds
+get_due_reminders(status=pending, remind_at <= now)
+↓
+mark_reminder_sending()
+↓
+Telegram send_message()
+↓
+mark_reminder_sent() or mark_reminder_failed()
+```
+
+Защита от дублей держится на статусах `pending → sending → sent`. Handlers не пишут в таблицу `reminders` напрямую: все изменения проходят через `app/reminder_service.py`.
+
+Будущие сценарии:
+
+- свежая расшифровка сможет дать кнопку `🔔 Напомнить по задаче`;
+- история сможет дать кнопку `🔔 Напомнить по задаче`;
+- будущий OpenAI `reminder_candidate` сможет предлагать готовое напоминание;
+- все эти сценарии должны вызывать `create_reminder()` из `app/reminder_service.py`.
 
 ## Поток Форматирования Задач
 
@@ -345,6 +432,7 @@ menu.py       Reply Keyboard actions
 settings.py   /settings
 admin.py      owner-only commands
 system.py     /health
+reminders.py  /reminders, /remind and reminder callbacks
 fallbacks.py  text and unsupported media
 ```
 
@@ -381,6 +469,12 @@ INSERT analytics_events
 - `settings_opened`;
 - `share_clicked`;
 - `paywall_shown`.
+- `reminders_opened`;
+- `reminder_created`;
+- `reminder_sent`;
+- `reminder_completed`;
+- `reminder_cancelled`;
+- `reminder_snoozed`.
 
 Payload ограничен служебными полями: длительность voice, тип ошибки, короткая ошибка, transcription id, остатки лимитов, причина, source, processing time. Полные transcript/summary/tasks и секреты в `analytics_events` не пишутся.
 

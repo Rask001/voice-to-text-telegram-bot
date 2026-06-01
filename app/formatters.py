@@ -2,6 +2,7 @@ from datetime import date, datetime, timedelta
 from html import escape
 
 from app.access import AccessStatus
+from app.models import Reminder
 from app.preferences import normalize_response_mode
 from app.tasks import TaskItem, normalize_tasks, parse_stored_tasks, sort_tasks_for_display
 
@@ -164,12 +165,40 @@ def format_my_id(telegram_id: int) -> str:
     )
 
 
+def format_reminders_list(reminders: list[Reminder]) -> str:
+    if not reminders:
+        return "🔔 У вас пока нет активных напоминаний."
+
+    lines = ["🔔 <b>Активные напоминания</b>"]
+    for index, reminder in enumerate(reminders, start=1):
+        lines.append(
+            "\n"
+            f"{index}. <b>{format_datetime(reminder.remind_at)}</b>\n"
+            f"{escape(reminder.task_text)}"
+        )
+    return "\n".join(lines)
+
+
+def format_reminder_created(reminder: Reminder) -> str:
+    return (
+        "✅ <b>Напоминание создано</b>\n\n"
+        f"🔔 {escape(reminder.task_text)}\n"
+        f"📅 <b>{format_datetime(reminder.remind_at)}</b>"
+    )
+
+
+def format_datetime(value: datetime) -> str:
+    return value.strftime("%d.%m.%Y %H:%M")
+
+
 def help_text() -> str:
     return (
         "❓ <b>Помощь</b>\n\n"
         "Я работаю только с обычными voice messages 🎙\n"
         "Текст, фото, файлы, кружки и аудиофайлы пока не обрабатываю.\n\n"
         "История обработок: /history или кнопка 📚 История.\n"
+        "Напоминания: /reminders или кнопка 🔔 Напомни.\n"
+        "Создать напоминание вручную: /remind.\n"
         "Профиль и лимиты: /profile или кнопка 👤 Профиль.\n"
         "Ваш Telegram ID: /my_id.\n"
         "📤 Поделиться создаёт отдельный блок, который удобно переслать вручную."

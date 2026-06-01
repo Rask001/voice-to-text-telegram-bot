@@ -82,6 +82,35 @@ Legacy таблица старого дневного счетчика.
 
 Примечание: `payload_json` хранит только служебные поля вроде `duration_seconds`, `error_type`, `transcription_id`, `remaining_minutes`, `remaining_daily_messages`, `reason`, `source`, `processing_time_seconds`. Полные расшифровки, summary, задачи и секреты не сохраняются.
 
+### `reminders`
+
+Хранит ручные и будущие task/history/AI напоминания.
+
+Поля:
+
+- `id INTEGER PRIMARY KEY`
+- `telegram_id BIGINT`
+- `transcription_id INTEGER NULL`
+- `task_text TEXT`
+- `source_text TEXT NULL`
+- `remind_at DATETIME`
+- `timezone VARCHAR(64) DEFAULT 'Europe/Moscow'`
+- `status VARCHAR(20) DEFAULT 'pending'`
+- `created_at DATETIME DEFAULT CURRENT_TIMESTAMP`
+- `sent_at DATETIME NULL`
+- `completed_at DATETIME NULL`
+- `cancelled_at DATETIME NULL`
+- `updated_at DATETIME NULL`
+
+Статусы:
+
+- `pending`
+- `sending`
+- `sent`
+- `completed`
+- `cancelled`
+- `failed`
+
 ## Ручные ALTER TABLE, Которые Уже Поддерживаются
 
 Файл: `app/db.py`, функция `_ensure_sqlite_schema_updates()`.
@@ -118,6 +147,8 @@ Legacy таблица старого дневного счетчика.
 - `ADD COLUMN payload_json TEXT DEFAULT ''`
 - `ADD COLUMN tariff_type VARCHAR(30) DEFAULT ''`
 
+Для `reminders` ручных `ALTER TABLE` пока нет: таблица создается через `Base.metadata.create_all()` как новая таблица.
+
 ## Очистка Пользовательской Истории
 
 Для полной очистки прошлых обработок удаляются только строки из:
@@ -129,6 +160,7 @@ Legacy таблица старого дневного счетчика.
 - `user_settings`
 - `daily_usage`
 - `analytics_events`
+- `reminders`
 - структура таблиц
 - `.env`
 - тарифы
@@ -174,11 +206,14 @@ Alembic стоит подключать, когда появится хотя б
 
 3. Разнести `VoiceNote.action_items` в отдельную таблицу `voice_note_tasks`, если понадобятся поиск, фильтры, статусы выполнения задач.
 
-4. Добавить индексы:
+4. Добавить отдельную таблицу связей задач и напоминаний, если понадобится несколько напоминаний на одну задачу.
+
+5. Добавить индексы:
    - `voice_notes(telegram_user_id, created_at)`
    - `user_settings(tariff_type)`
+   - `reminders(telegram_id, status, remind_at)`
 
-5. Перейти с SQLite на PostgreSQL для серверного деплоя с большим числом пользователей.
+6. Перейти с SQLite на PostgreSQL для серверного деплоя с большим числом пользователей.
 
 ## Рекомендованный Путь Внедрения Alembic
 

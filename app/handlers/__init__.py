@@ -11,6 +11,7 @@ from app.handlers.help import router as help_router
 from app.handlers.history import _send_history, history_callback, router as history_router
 from app.handlers.menu import router as menu_router
 from app.handlers.profile import router as profile_router
+from app.handlers.reminders import router as reminders_router
 from app.handlers.settings import router as settings_router
 from app.handlers.start import router as start_router
 from app.handlers.system import router as system_router
@@ -24,6 +25,7 @@ router.include_router(settings_router)
 router.include_router(profile_router)
 router.include_router(help_router)
 router.include_router(history_router)
+router.include_router(reminders_router)
 router.include_router(admin_router)
 router.include_router(voice_router)
 router.include_router(callbacks_router)

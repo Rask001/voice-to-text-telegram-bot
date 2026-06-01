@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from contextlib import suppress
 from urllib.parse import urlsplit, urlunsplit
 
 from aiogram import Bot, Dispatcher
@@ -10,6 +11,7 @@ from app.config import get_settings
 from app.db import create_session_factory
 from app.handlers import router
 from app.openai_service import OpenAIService
+from app.reminder_scheduler import run_reminder_scheduler
 
 
 async def main() -> None:
@@ -24,11 +26,20 @@ async def main() -> None:
     dp = Dispatcher()
 
     dp["settings"] = settings
-    dp["session_factory"] = create_session_factory(settings)
+    session_factory = create_session_factory(settings)
+    dp["session_factory"] = session_factory
     dp["openai_service"] = OpenAIService(settings)
 
     dp.include_router(router)
-    await dp.start_polling(bot)
+    reminder_task = asyncio.create_task(
+        run_reminder_scheduler(bot, session_factory, settings)
+    )
+    try:
+        await dp.start_polling(bot)
+    finally:
+        reminder_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await reminder_task
 
 
 def _log_startup_settings(settings) -> None:

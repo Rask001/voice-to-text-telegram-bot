@@ -54,6 +54,28 @@ class VoiceNote(Base):
     )
 
 
+class Reminder(Base):
+    __tablename__ = "reminders"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    telegram_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    transcription_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    task_text: Mapped[str] = mapped_column(Text)
+    source_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    remind_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    timezone: Mapped[str] = mapped_column(String(64), default="Europe/Moscow")
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        index=True,
+    )
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class UserSettings(Base):
     __tablename__ = "user_settings"
 

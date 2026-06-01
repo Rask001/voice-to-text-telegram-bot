@@ -137,7 +137,14 @@
 
 - `app/handlers/constants.py`: constants `MENU_*`;
 - `app/handlers/keyboards.py`: `main_keyboard()`;
+- `app/handlers/keyboards.py`: `reminders_menu_keyboard()`;
 - `app/handlers/menu.py`: `reply_keyboard_handler()`.
+
+Важно:
+
+- основная панель компактная: `🎙 Голосовое | 🔔 Напомни`, `👤 Профиль | 📚 История`, `⚙️ Настройки | ❓ Помощь`;
+- `🔔 Напомни` открывает вложенное меню напоминаний: `➕ Создать`, `📋 Текущие`, `⬅️ Назад`;
+- старые тексты `🎙 Новое голосовое`, `🔔` и `🔔 Напоминания` должны оставаться совместимыми.
 
 Проверить:
 
@@ -179,7 +186,7 @@
 - Free trial days и total minutes;
 - Standard/Premium monthly limits;
 - `/profile`;
-- кнопка `🎙 Новое голосовое`;
+- кнопка `🎙 Голосовое` и legacy-текст `🎙 Новое голосовое`;
 - voice access до OpenAI.
 
 ### Если нужно добавить оплату Telegram Stars
@@ -217,6 +224,34 @@
 - admin stats форматируются в `app/analytics_service.py:format_admin_stats()`;
 - минуты в admin stats должны оставаться дробными, чтобы короткие voice не округлялись в 0;
 - блок конверсий в UI должен быть на русском.
+
+### Если нужно изменить напоминания
+
+Читать:
+
+- `app/reminder_service.py`;
+- `app/reminder_scheduler.py`;
+- `app/reminder_parser.py`;
+- `app/handlers/reminders.py`;
+- `app/models.py`: `Reminder`;
+- `app/handlers/keyboards.py`: reminder keyboards.
+
+Важно:
+
+- handlers не должны напрямую писать в таблицу `reminders`;
+- простой текстовый парсер времени живет только в `app/reminder_parser.py` и не использует OpenAI;
+- основная точка входа parser — `parse_reminder_text()`, старые функции остаются совместимыми обертками;
+- разговорные относительные фразы вроде `через минуту`, `через 10`, `минут через 15`, `через пол часа`, `через пару часов` должны парситься там же;
+- service words cleanup (`напомни`, `напомни мне`, `поставь напоминание`, `чтобы`, `пожалуйста`) тоже живет в parser;
+- если пользователь в FSM `/remind` прислал текст уже со временем, handler должен сразу создать reminder без меню выбора времени;
+- если parser нашел время, но задача пустая, handler должен спросить `Что напомнить?`, а не создавать пустой reminder;
+- `/remind <время> <текст>` и FSM `/remind` оба должны создавать записи через `create_reminder()`;
+- настройки времени берутся из `DEFAULT_TIMEZONE` и `DEFAULT_REMINDER_TIME`;
+- scheduler должен сравнивать due reminders со временем из `DEFAULT_TIMEZONE`, а не с системным `datetime.now()`;
+- создание из задач, истории и будущий AI `reminder_candidate` должны идти через `create_reminder()`;
+- не менять OpenAI prompt для напоминаний без отдельной задачи;
+- не добавлять автоматическое создание напоминаний после каждой расшифровки;
+- scheduler защищается от дублей статусами `pending`, `sending`, `sent`.
 
 ### Если нужно изменить задачи
 

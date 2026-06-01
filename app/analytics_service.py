@@ -323,6 +323,7 @@ def _sanitize_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "source",
         "tariff_type",
         "processing_time_seconds",
+        "reminder_id",
     }
     sanitized: dict[str, Any] = {}
     for key, value in payload.items():

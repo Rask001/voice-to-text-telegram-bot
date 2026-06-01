@@ -81,13 +81,22 @@
 
 Описание: постоянное нижнее меню Telegram.
 
-Кнопки:
+Основная панель:
 
-- `🎙 Новое голосовое`
-- `👤 Профиль`
-- `📚 История`
-- `⚙️ Настройки`
-- `❓ Помощь`
+```text
+🎙 Голосовое | 🔔 Напомни
+👤 Профиль  | 📚 История
+⚙️ Настройки | ❓ Помощь
+```
+
+Вложенное меню напоминаний:
+
+```text
+➕ Создать | 📋 Текущие
+⬅️ Назад
+```
+
+Старые тексты `🎙 Новое голосовое`, `🔔` и `🔔 Напоминания` продолжают обрабатываться.
 
 Основные файлы:
 
@@ -98,6 +107,7 @@
 Ключевые функции:
 
 - `main_keyboard()`
+- `reminders_menu_keyboard()`
 - `reply_keyboard_handler()`
 
 ## Прием Voice Messages
@@ -121,6 +131,82 @@
 - `check_user_access()`
 - `OpenAIService.transcribe()`
 - `OpenAIService.analyze()`
+
+## Напоминания
+
+Описание: отдельная подсистема ручных напоминаний поверх задач и истории. На этом этапе OpenAI не используется, напоминания не создаются автоматически и не добавляются в обычную расшифровку.
+
+Команды:
+
+- `/reminders`
+- `/remind`
+
+Основные файлы:
+
+- `app/models.py`: `Reminder`
+- `app/reminder_service.py`
+- `app/reminder_scheduler.py`
+- `app/reminder_parser.py`
+- `app/handlers/reminders.py`
+- `app/handlers/keyboards.py`
+- `app/handlers/menu.py`
+- `app/formatters.py`
+
+Ключевые функции:
+
+- `create_reminder()`
+- `get_user_reminders()`
+- `get_due_reminders()`
+- `cancel_reminder()`
+- `complete_reminder()`
+- `snooze_reminder()`
+- `parse_reminder_time_text()`
+- `parse_reminder_request()`
+- `run_reminder_scheduler()`
+- `process_due_reminders_once()`
+
+Создание:
+
+- `/remind` — FSM: текст → сразу создать, если время есть в тексте; иначе выбор кнопки времени или ручной ввод времени;
+- `/remind завтра 14:30 заехать в автосервис`;
+- `/remind через 30 минут проверить бота`;
+- `/remind через минуту проверить бота`;
+- `/remind через 10 проверить бота`;
+- `/remind 18:00 оплатить сервер`.
+- `➕ Создать` → `позвонить Соне в 21:21` создает напоминание сразу без меню выбора времени.
+
+Парсер времени работает без OpenAI и возвращает структурированный результат через `parse_reminder_text()`: `success`, `task_text`, `remind_at`, `timezone`, `matched_pattern`, `error`, `needs_task`.
+
+Поддерживаются:
+
+- минуты: `через минуту`, `через одну минуту`, `через 10`, `через минут 10`, `минут через 15`, `через полчаса`, `через пол часа`, `через пару минут`, `через несколько минут`;
+- часы: `через час`, `через часик`, `через два часа`, `часа через 2`, `через пару часов`, `через несколько часов`;
+- смешанный формат: `через 1 час 30 минут`, `через час 30 минут`, `через полтора часа`, `через 1.5 часа`;
+- `сегодня`, `завтра`, части дня (`утром`, `днём`, `вечером`, `ночью`);
+- дни недели: `в пятницу`, `в пятницу 14:30`, `позвонить Соне в пятницу вечером`;
+- ввод только времени и формат `задача в HH:MM`.
+
+Если время без даты уже прошло сегодня, используется завтра. Если написано `через 10` без единиц, это считается 10 минут. Служебные слова вроде `напомни`, `напомни мне`, `поставь напоминание`, `чтобы`, `пожалуйста` удаляются из `task_text`. Если время найдено, но задача пустая, handler спрашивает `Что напомнить?`. Часовой пояс берется из `DEFAULT_TIMEZONE`, дефолтное время — из `DEFAULT_REMINDER_TIME`. Scheduler также сравнивает due reminders со временем из `DEFAULT_TIMEZONE`, чтобы не зависеть от системной таймзоны сервера.
+
+Статусы:
+
+- `pending`
+- `sending`
+- `sent`
+- `completed`
+- `cancelled`
+- `failed`
+
+Callback data:
+
+- `remind_time:<choice>`
+- `remind_time:manual`
+- `reminder_complete:<id>`
+- `reminder_cancel:<id>`
+- `reminder_snooze_hour:<id>`
+- `reminder_snooze_tomorrow:<id>`
+
+Будущие сценарии создания из задач, истории и AI `reminder_candidate` должны вызывать тот же `ReminderService.create_reminder()`.
 
 ## Быстрый Статус Обработки
 
@@ -414,6 +500,12 @@ Callback data:
 - `settings_opened`
 - `share_clicked`
 - `paywall_shown`
+- `reminders_opened`
+- `reminder_created`
+- `reminder_sent`
+- `reminder_completed`
+- `reminder_cancelled`
+- `reminder_snoozed`
 
 Основные файлы:
 
@@ -427,6 +519,8 @@ Callback data:
 - `app/handlers/settings.py`
 - `app/handlers/menu.py`
 - `app/handlers/start.py`
+- `app/handlers/reminders.py`
+- `app/reminder_scheduler.py`
 
 Ключевые функции:
 

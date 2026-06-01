@@ -119,19 +119,20 @@
 - Назначение: точка входа приложения.
 - Основные классы: нет.
 - Основные функции:
-  - `main()` — настраивает логирование, читает настройки, создает `Bot`, `Dispatcher`, session factory, `OpenAIService`, регистрирует router и запускает polling.
+  - `main()` — настраивает логирование, читает настройки, создает `Bot`, `Dispatcher`, session factory, `OpenAIService`, запускает reminder scheduler, регистрирует router и запускает polling.
 - Связи:
   - читает `get_settings()` из `app/config.py`;
   - создает SQLite session factory через `app/db.py`;
   - подключает aggregate router из `app/handlers/__init__.py`;
   - создает `OpenAIService` из `app/openai_service.py`;
+  - запускает `run_reminder_scheduler()` из `app/reminder_scheduler.py`;
   - использует aiogram polling, не webhook.
 
 ### `app/config.py`
 
 - Назначение: загрузка env-файла через `ENV_FILE` и типизированные настройки.
 - Основные классы:
-  - `Settings` — dataclass с Telegram/OpenAI/SQLite/лимитами/owner настройками, `env_file`, `app_env`.
+  - `Settings` — dataclass с Telegram/OpenAI/SQLite/лимитами/owner настройками, `env_file`, `app_env`, `default_timezone`, `default_reminder_time`.
 - Основные функции:
   - `get_settings()` — читает `ENV_FILE` или `.env`, валидирует обязательные `TELEGRAM_BOT_TOKEN` и `OPENAI_API_KEY`;
   - `_infer_app_env()` — определяет `local`/`production` по имени env-файла;
@@ -165,11 +166,12 @@
   - `DailyUsage` — legacy дневной счетчик обработок;
   - `AnalyticsEvent` — локальные события использования бота;
   - `VoiceNote` — сохраненная расшифровка, summary, tasks, details, message ids;
+  - `Reminder` — ручные и будущие task/history/AI напоминания;
   - `UserSettings` — настройки пользователя, тариф, counters, trial/month limits.
 - Основные функции: нет.
 - Связи:
   - наследуется от `Base` из `app/db.py`;
-  - используется в `app/handlers/`, `app/preferences.py`, `app/limits.py`, `app/access.py`;
+  - используется в `app/handlers/`, `app/preferences.py`, `app/limits.py`, `app/access.py`, `app/reminder_service.py`;
   - `VoiceNote.action_items` хранит новые задачи JSON-массивом `{text, priority}`, старые записи могут быть newline-строками;
   - `AnalyticsEvent.payload_json` хранит только служебный JSON без расшифровок и секретов;
   - при полной очистке пользовательской истории удаляются строки из `voice_notes`, но структура таблицы сохраняется.
@@ -183,13 +185,13 @@
 - Назначение: aggregate router и публичные exports для тестов.
 - Основные классы: нет.
 - Основные функции: нет.
-- Связи: подключает роутеры `start`, `system`, `settings`, `profile`, `help`, `history`, `admin`, `voice`, `callbacks`, `menu`, `fallbacks`.
+- Связи: подключает роутеры `start`, `system`, `settings`, `profile`, `help`, `history`, `reminders`, `admin`, `voice`, `callbacks`, `menu`, `fallbacks`.
 
 ### `app/handlers/constants.py`
 
 - Назначение: общие константы handlers.
 - Основные классы: нет.
-- Основные данные: `MODE_LABELS`, `BUTTON_LOCKS`, `MENU_*`.
+- Основные данные: `MODE_LABELS`, `BUTTON_LOCKS`, `MENU_*`, legacy-тексты старых Reply Keyboard кнопок.
 - Связи: используется в keyboards, callbacks, menu.
 
 ### `app/handlers/keyboards.py`
@@ -197,9 +199,14 @@
 - Назначение: Reply Keyboard и inline keyboards.
 - Основные функции:
   - `main_keyboard()`;
+  - `reminders_menu_keyboard()`;
   - `note_keyboard()`;
   - `settings_keyboard()`;
-  - `history_keyboard()`.
+  - `history_keyboard()`;
+  - `reminder_time_keyboard()`;
+  - `reminder_fallback_time_keyboard()`;
+  - `reminder_action_keyboard()`;
+  - `reminders_keyboard()`.
 - Связи: используется почти всеми handler-модулями.
 
 ### `app/handlers/utils.py`
@@ -265,6 +272,21 @@
   - `_send_history()`.
 - Связи: использует `VoiceNote`, `format_history()`, `format_history_item()`, `history_keyboard()`, `note_keyboard(source="history")`.
 
+### `app/handlers/reminders.py`
+
+- Назначение: `/reminders`, `/remind`, ручной FSM создания и callback-кнопки напоминаний.
+- Основные классы:
+  - `ReminderCreation`.
+- Основные функции:
+  - `reminders_command()`;
+  - `remind_command()`;
+  - `reminder_text_received()`;
+  - `reminder_time_selected()`;
+  - `reminder_manual_time_received()`;
+  - `reminder_action_callback()`;
+  - `send_user_reminders()`.
+- Связи: использует `app/reminder_service.py`, `app/reminder_parser.py`, `Reminder`, `format_reminders_list()`, `format_reminder_created()`, reminder keyboards и analytics events. Создание идет через `create_reminder()` как для FSM, так и для `/remind <время> <текст>`; если текст FSM уже содержит время, меню выбора времени не показывается.
+
 ### `app/handlers/admin.py`
 
 - Назначение: owner-only админские команды.
@@ -296,7 +318,7 @@
 - Назначение: Reply Keyboard actions.
 - Основные функции:
   - `reply_keyboard_handler()`.
-- Связи: маршрутизирует нижнее меню в profile/history/settings/help/new voice, пишет события `profile_opened`, `history_opened`, `paywall_shown`.
+- Связи: маршрутизирует главное меню в profile/history/settings/help/new voice и вложенное меню напоминаний в `/remind`/`/reminders`; пишет события `profile_opened`, `history_opened`, `reminders_opened`, `paywall_shown`.
 
 ### `app/handlers/fallbacks.py`
 
@@ -315,7 +337,7 @@
   - `format_response()` — выбирает short/full/tasks режим;
   - `format_short()`, `format_details()`, `format_tasks()`, `format_share()`;
   - `format_history()`, `format_history_item()`;
-  - `format_profile()`, `format_my_id()`, `format_settings()`, `help_text()`;
+  - `format_profile()`, `format_my_id()`, `format_reminders_list()`, `format_reminder_created()`, `format_settings()`, `help_text()`;
   - `format_numbered_list()` — нумерованный список задач с priority-сортировкой;
   - `analysis_list()`, `fallback_title()`, `format_note_date()`, `trim()`, `trim_plain()`.
 - Связи:
@@ -343,6 +365,43 @@
   - использует `check_user_access()` для определения тарифа на момент события;
   - вызывается из `app/handlers/start.py`, `profile.py`, `settings.py`, `history.py`, `menu.py`, `voice.py`, `callbacks.py`, `admin.py`;
   - не сохраняет расшифровки, summary, задачи или секреты.
+
+### `app/reminder_service.py`
+
+- Назначение: единая бизнес-логика напоминаний.
+- Основные функции:
+  - `create_reminder()`;
+  - `get_user_reminders()`;
+  - `get_reminder_by_id()`;
+  - `cancel_reminder()`;
+  - `complete_reminder()`;
+  - `snooze_reminder()`;
+  - `get_due_reminders()`;
+  - `mark_reminder_sending()`;
+  - `mark_reminder_sent()`;
+  - `mark_reminder_failed()`.
+- Связи: работает с моделью `Reminder`; вызывается из `app/handlers/reminders.py` и `app/reminder_scheduler.py`.
+
+### `app/reminder_scheduler.py`
+
+- Назначение: фоновая отправка due reminders.
+- Основные функции:
+  - `run_reminder_scheduler()` — цикл каждые 30 секунд;
+  - `process_due_reminders_once()` — один проход для scheduler и тестов.
+- Связи: использует `reminder_service`, `now_in_timezone(settings.default_timezone)`, `reminder_action_keyboard()`, `Bot.send_message()`, пишет `reminder_sent`.
+
+### `app/reminder_parser.py`
+
+- Назначение: простой парсер времени напоминаний без OpenAI.
+- Основные функции:
+  - `parse_reminder_text()`;
+  - `parse_reminder_time_choice()`;
+  - `parse_simple_reminder_time()`;
+  - `parse_reminder_time_text()`;
+  - `parse_reminder_request()`;
+  - `parse_default_time()`;
+  - `now_in_timezone()`.
+- Связи: используется ручным `/remind`; поддерживает кнопки времени, ручной ввод, команды вида `/remind завтра 14:30 заехать в автосервис`, разговорные относительные фразы `через минуту`/`через 10`/`минут через 15`/`через пол часа`/`через пару часов`, дни недели и текст вида `позвонить Соне в 21:21`. Читает настройки через handler: `DEFAULT_TIMEZONE` и `DEFAULT_REMINDER_TIME`.
 
 ### `app/tasks.py`
 
@@ -521,6 +580,43 @@
   - owner имеет доступ к admin stats;
   - обычный пользователь не имеет доступ к admin stats.
 - Связи: использует `app/analytics_service.py`, `app/handlers/admin.py`, `app/models.py`.
+
+### `tests/test_reminder_service.py`
+
+- Назначение: unit-тесты напоминаний и scheduler без Telegram API.
+- Основные классы:
+  - `ReminderServiceTests`.
+- Основные проверки:
+  - `create_reminder()` создает `pending`;
+  - `get_user_reminders()` и `get_reminder_by_id()` не показывают чужие напоминания;
+  - cancel/complete меняют статусы;
+  - `get_due_reminders()` возвращает только due `pending`;
+  - sent/completed/cancelled не попадают в due;
+  - scheduler не отправляет одно напоминание дважды.
+- Связи: использует `app/reminder_service.py`, `app/reminder_scheduler.py`, `app/db.py`, `app/models.py`.
+
+### `tests/test_reminder_parser.py`
+
+- Назначение: unit-тесты простого парсера времени напоминаний без OpenAI.
+- Основные классы:
+  - `ReminderParserTests`.
+- Основные проверки:
+  - относительное время: `через минуту`, `через 10`, `через пол часа`, `через 10 минут`, `через 30 минут`, `через 1 час`;
+  - `завтра 14:30`, `завтра утром`, `завтра днём`, `завтра вечером`;
+  - ввод только времени на сегодня или завтра;
+  - неправильный формат возвращает `None`;
+  - команда `/remind <время> <текст>` разделяет время и текст задачи.
+- Связи: использует `app/reminder_parser.py`.
+
+### `tests/test_reminder_handlers.py`
+
+- Назначение: unit-тесты UX создания напоминания в FSM без Telegram API.
+- Основные классы:
+  - `ReminderHandlerTests`.
+- Основные проверки:
+  - текст со временем создает напоминание сразу и не показывает меню выбора времени;
+  - текст без времени показывает меню выбора времени и не создает запись.
+- Связи: использует `app/handlers/reminders.py`, `app/db.py`, `app/models.py`.
 
 ## `docs/`
 

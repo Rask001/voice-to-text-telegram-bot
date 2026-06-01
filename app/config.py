@@ -17,6 +17,8 @@ class Settings:
     daily_voice_limit: int = 5
     max_voice_seconds: int = 900
     default_response_mode: str = "short"
+    default_timezone: str = "Russia/Moscow"
+    default_reminder_time: str = "10:00"
     owner_telegram_id: int | None = None
     unlimited_user_ids: tuple[int, ...] = ()
 
@@ -46,6 +48,10 @@ def get_settings() -> Settings:
         daily_voice_limit=int(os.getenv("DAILY_VOICE_LIMIT", "5")),
         max_voice_seconds=int(os.getenv("MAX_VOICE_SECONDS", "900")),
         default_response_mode=os.getenv("DEFAULT_RESPONSE_MODE", "short").strip().lower(),
+        default_timezone=os.getenv("DEFAULT_TIMEZONE", "Russia/Moscow").strip()
+        or "Russia/Moscow",
+        default_reminder_time=os.getenv("DEFAULT_REMINDER_TIME", "10:00").strip()
+        or "10:00",
         owner_telegram_id=_parse_optional_int(os.getenv("OWNER_TELEGRAM_ID", "")),
         unlimited_user_ids=_parse_int_list(os.getenv("UNLIMITED_USER_IDS", "")),
     )
