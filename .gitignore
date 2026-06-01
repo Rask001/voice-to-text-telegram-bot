@@ -1,4 +1,6 @@
 .env
+.env.local
+.env.production
 .venv/
 __pycache__/
 pycache/
@@ -10,7 +12,11 @@ pycache/
 data/*.db
 data/*.sqlite
 data/*.log
+data/*.pid
 bot.db
+bot_local_test.db
+*.db
+*.pid
 logs/
 .DS_Store
 downloads/

@@ -19,12 +19,17 @@
 - `app/main.py`
 - `app/config.py`
 - `start.sh`
+- `start_local.sh`
+- `stop_local.sh`
+- `status_local.sh`
 - `Dockerfile`
 - `docker-compose.yml`
 
 Проверить:
 
 - `python -m app.main`
+- `./start_local.sh`
+- `./status_local.sh`
 - `./status.sh`
 
 ### Если нужно изменить `.env` или настройки
@@ -34,11 +39,19 @@
 - `app/config.py`
 - `.env.example`
 - `README.md`
+- `start_local.sh`
 
 Не делать:
 
 - не выводить реальные значения `.env`;
-- не коммитить `.env`.
+- не коммитить `.env`, `.env.local`, `.env.production`;
+- не использовать production Telegram token для локального polling.
+
+Важно:
+
+- локальная разработка использует `ENV_FILE=.env.local`;
+- production/deploy flow по умолчанию продолжает читать `.env`;
+- `bot_local_test.db` не должен смешиваться с `data/bot.db`.
 
 ### Если нужно изменить OpenAI prompt
 

@@ -11,6 +11,29 @@
 - `app/main.py`
 - `app/handlers/__init__.py`
 
+## Локальная Тестовая Среда
+
+Описание: отдельный локальный контур для разработки с тестовым Telegram bot token, тем же OpenAI API key и отдельной SQLite базой.
+
+Основные файлы:
+
+- `app/config.py`
+- `app/db.py`
+- `start_local.sh`
+- `stop_local.sh`
+- `status_local.sh`
+- `.env.example`
+- `.gitignore`
+
+Ключевые элементы:
+
+- `ENV_FILE=.env.local`;
+- `APP_ENV=local`;
+- `DATABASE_URL=sqlite+aiosqlite:///./bot_local_test.db`;
+- PID-файл `data/local_bot.pid`;
+- логи `logs/local.out.log` и `logs/local.err.log`;
+- защита от запуска production token локально.
+
 ## Модульные Handlers
 
 Описание: Telegram orchestration разделен по областям, вместо одного большого `handlers.py`.

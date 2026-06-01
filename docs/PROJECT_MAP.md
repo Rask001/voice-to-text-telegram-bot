@@ -16,14 +16,28 @@
 - Назначение: безопасный шаблон переменных окружения без реальных секретов.
 - Основные классы: нет.
 - Основные функции: нет.
-- Связи: читается через `app/config.py` после копирования в `.env`.
+- Связи: читается через `app/config.py` после копирования в `.env`, `.env.local` или `.env.production`.
+
+### `.env.local`
+
+- Назначение: локальный тестовый env для отдельного Telegram test bot token и отдельной SQLite базы `bot_local_test.db`.
+- Основные классы: нет.
+- Основные функции: нет.
+- Связи: загружается через `ENV_FILE=.env.local`; используется `start_local.sh`; не коммитится.
+
+### `.env.production`
+
+- Назначение: production env с боевым Telegram token, OpenAI key и production `DATABASE_URL`.
+- Основные классы: нет.
+- Основные функции: нет.
+- Связи: загружается через `ENV_FILE=.env.production`; не коммитится.
 
 ### `.gitignore`
 
 - Назначение: исключает секреты, виртуальное окружение, SQLite базу, логи, временные файлы и macOS metadata.
 - Основные классы: нет.
 - Основные функции: нет.
-- Связи: защищает `.env`, `.venv/`, `data/*.db`, `logs/`, `.DS_Store`.
+- Связи: защищает `.env`, `.env.local`, `.env.production`, `.venv/`, `data/*.db`, `*.db`, `logs/`, `.DS_Store`.
 
 ### `requirements.txt`
 
@@ -53,6 +67,27 @@
 - Основные классы: нет.
 - Основные функции: нет.
 - Связи: подхватывает Homebrew PATH, проверяет существующий процесс `app.main`, запускает `.venv/bin/python -m app.main`.
+
+### `start_local.sh`
+
+- Назначение: безопасный запуск локального тестового бота в background.
+- Основные классы: нет.
+- Основные функции: нет.
+- Связи: принудительно использует `.env.local`, проверяет отдельный test token и `bot_local_test.db`, пишет PID в `data/local_bot.pid`, логи в `logs/local.*.log`.
+
+### `stop_local.sh`
+
+- Назначение: остановка только локального тестового процесса.
+- Основные классы: нет.
+- Основные функции: нет.
+- Связи: останавливает PID из `data/local_bot.pid` и не трогает другие Python-процессы.
+
+### `status_local.sh`
+
+- Назначение: статус локального тестового процесса.
+- Основные классы: нет.
+- Основные функции: нет.
+- Связи: показывает `.env.local`, PID, resources и хвост логов `logs/local.*.log`.
 
 ### `stop.sh`
 
@@ -94,11 +129,12 @@
 
 ### `app/config.py`
 
-- Назначение: загрузка `.env` и типизированные настройки.
+- Назначение: загрузка env-файла через `ENV_FILE` и типизированные настройки.
 - Основные классы:
-  - `Settings` — dataclass с Telegram/OpenAI/SQLite/лимитами/owner настройками.
+  - `Settings` — dataclass с Telegram/OpenAI/SQLite/лимитами/owner настройками, `env_file`, `app_env`.
 - Основные функции:
-  - `get_settings()` — читает env, валидирует обязательные `TELEGRAM_BOT_TOKEN` и `OPENAI_API_KEY`;
+  - `get_settings()` — читает `ENV_FILE` или `.env`, валидирует обязательные `TELEGRAM_BOT_TOKEN` и `OPENAI_API_KEY`;
+  - `_infer_app_env()` — определяет `local`/`production` по имени env-файла;
   - `_parse_optional_int()` — парсит `OWNER_TELEGRAM_ID`;
   - `_parse_int_list()` — парсит `UNLIMITED_USER_IDS`.
 - Связи:
@@ -112,6 +148,7 @@
 - Основные функции:
   - `create_session_factory()` — создает engine, таблицы и безопасно добавляет недостающие SQLite-колонки;
   - `_ensure_sqlite_parent()` — создает папку для SQLite файла;
+  - `_sync_database_url()` — приводит `sqlite+aiosqlite:///...` к sync URL для текущего SQLAlchemy engine;
   - `_ensure_sqlite_schema_updates()` — добавляет новые колонки в `voice_notes` и `user_settings`;
   - `_add_text_column()`, `_add_integer_column()` — helpers для SQLite ALTER TABLE;
   - `session_scope()` — контекстный helper commit/rollback.

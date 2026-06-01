@@ -19,7 +19,7 @@ SQLite / OpenAI / ffmpeg / Telegram replies
 ## Запуск
 
 ```text
-start.sh or python -m app.main
+start.sh / start_local.sh / python -m app.main
 ↓
 get_settings()
 ↓
@@ -33,6 +33,36 @@ dp.start_polling(bot)
 ```
 
 `app/main.py` создает `Bot` с `ParseMode.HTML`, поэтому все сообщения форматируются HTML-тегами (`<b>...</b>`), а не Markdown.
+
+## Окружения: Local vs Production
+
+```text
+production:
+.env or .env.production
+↓
+production Telegram Bot Token
+↓
+data/bot.db or production DATABASE_URL
+```
+
+```text
+local test:
+start_local.sh
+↓
+ENV_FILE=.env.local
+↓
+separate Telegram test bot token
+↓
+sqlite+aiosqlite:///./bot_local_test.db
+```
+
+`ENV_FILE` выбирает env-файл. Если переменная не задана, читается `.env`, чтобы существующий production/deploy flow не менялся.
+
+`start_local.sh` защищает от случайного запуска production token локально: сравнивает токен с `.env`, требует базу `bot_local_test.db`, пишет PID в `data/local_bot.pid` и логи в `logs/local.out.log` / `logs/local.err.log`.
+
+На старте `app/main.py` логирует `APP_ENV`, `ENV_FILE`, безопасный `DATABASE_URL` и только последние 4 символа Telegram token. OpenAI key и полный Telegram token не логируются.
+
+Текущий SQLAlchemy engine синхронный. Для удобства локального `.env.local` `app/db.py` принимает `sqlite+aiosqlite:///...` и внутри приводит его к `sqlite:///...`.
 
 ## Поток Voice Message
 

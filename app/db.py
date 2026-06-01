@@ -12,6 +12,7 @@ class Base(DeclarativeBase):
 
 
 def _ensure_sqlite_parent(database_url: str) -> None:
+    database_url = _sync_database_url(database_url)
     if not database_url.startswith("sqlite:///"):
         return
 
@@ -23,12 +24,19 @@ def _ensure_sqlite_parent(database_url: str) -> None:
 def create_session_factory(settings: Settings) -> sessionmaker[Session]:
     import app.models  # noqa: F401
 
-    _ensure_sqlite_parent(settings.database_url)
-    connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
-    engine = create_engine(settings.database_url, connect_args=connect_args)
+    database_url = _sync_database_url(settings.database_url)
+    _ensure_sqlite_parent(database_url)
+    connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
+    engine = create_engine(database_url, connect_args=connect_args)
     Base.metadata.create_all(engine)
-    _ensure_sqlite_schema_updates(engine, settings.database_url)
+    _ensure_sqlite_schema_updates(engine, database_url)
     return sessionmaker(engine, expire_on_commit=False)
+
+
+def _sync_database_url(database_url: str) -> str:
+    if database_url.startswith("sqlite+aiosqlite:///"):
+        return database_url.replace("sqlite+aiosqlite:///", "sqlite:///", 1)
+    return database_url
 
 
 def _ensure_sqlite_schema_updates(engine, database_url: str) -> None:

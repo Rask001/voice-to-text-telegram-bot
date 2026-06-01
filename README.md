@@ -92,6 +92,49 @@ brew install ffmpeg
 
 После запуска отправьте боту `/start`, затем голосовое сообщение.
 
+## Локальная тестовая среда
+
+Для разработки на рабочем MacBook используйте отдельного тестового Telegram-бота. Так локальный polling не конфликтует с production-ботом на серверном Mac.
+
+Env-файлы:
+
+- `.env.production` — production-секреты и production SQLite URL; не коммитится.
+- `.env.local` — тестовый Telegram Bot Token, тот же OpenAI API key и отдельная база; не коммитится.
+- `.env.example` — шаблон без секретов, хранится в Git.
+
+Создать тестового бота можно через [@BotFather](https://t.me/BotFather): `/newbot`, имя, username, затем вставить test token в `.env.local`.
+
+Пример `.env.local`:
+
+```env
+APP_ENV=local
+TELEGRAM_BOT_TOKEN=123456:test_bot_token
+OPENAI_API_KEY=sk-your-key
+DATABASE_URL=sqlite+aiosqlite:///./bot_local_test.db
+DEFAULT_RESPONSE_MODE=short
+OWNER_TELEGRAM_ID=
+UNLIMITED_USER_IDS=
+```
+
+Локальный тестовый бот запускается только через `.env.local`:
+
+```bash
+./start_local.sh
+./status_local.sh
+./stop_local.sh
+```
+
+`start_local.sh` специально проверяет, что:
+
+- используется `.env.local`;
+- Telegram token отличается от `.env`;
+- база называется `bot_local_test.db`;
+- в лог выводятся только последние 4 символа токена.
+
+Локальная тестовая база создается отдельно: `./bot_local_test.db`. Production `data/bot.db` и серверный бот не трогаются.
+
+Важно: Telegram polling допускает только один активный процесс на один Telegram Bot Token. Поэтому локально используйте test token, а production token оставляйте только на сервере.
+
 ## Проверки
 
 ```bash
@@ -111,7 +154,17 @@ SQLite база будет лежать в `./data/bot.db`.
 
 ## Настройки
 
+Приложение поддерживает `ENV_FILE`:
+
+```bash
+ENV_FILE=.env.local python -m app.main
+ENV_FILE=.env.production python -m app.main
+```
+
+Если `ENV_FILE` не указан, по умолчанию читается `.env`.
+
 ```env
+APP_ENV=production
 OPENAI_TRANSCRIBE_MODEL=gpt-4o-mini-transcribe
 OPENAI_TEXT_MODEL=gpt-5-mini
 DATABASE_URL=sqlite:///data/bot.db
