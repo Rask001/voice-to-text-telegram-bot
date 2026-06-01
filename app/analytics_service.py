@@ -1,7 +1,9 @@
 import json
 import logging
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta
+from html import escape
 from typing import Any
 
 from sqlalchemy import delete, select
@@ -22,21 +24,26 @@ class AdminStats:
     end_date: datetime
     new_users: int
     active_users: int
+    users_with_voice: int
     voice_received: int
     voice_processed_success: int
     voice_processing_failed: int
     voice_limit_blocked: int
-    audio_minutes_received: int
-    audio_minutes_processed: int
+    audio_minutes_received: float
+    audio_minutes_processed: float
+    average_processing_time_seconds: float
     history_opened: int
     profile_opened: int
     share_clicked: int
     paywall_shown: int
     active_by_tariff: dict[str, int]
-    activation_rate: float
+    new_user_activation_rate: float
+    active_voice_rate: float
     success_rate: float
     limit_block_rate: float
     share_rate: float
+    error_counts: dict[str, int]
+    block_reason_counts: dict[str, int]
 
 
 def track_event(
@@ -114,16 +121,18 @@ def cleanup_old_events(session_factory: sessionmaker[Session], days: int = 90) -
 
 def format_admin_stats(stats: AdminStats, title: str) -> str:
     tariff_counts = stats.active_by_tariff
-    return (
+    text = (
         f"📊 <b>{title}</b>\n\n"
         f"Новых пользователей: <b>{stats.new_users}</b>\n"
         f"Активных пользователей: <b>{stats.active_users}</b>\n"
+        f"Пользователей с голосовыми: <b>{stats.users_with_voice}</b>\n"
         f"Голосовых получено: <b>{stats.voice_received}</b>\n"
         f"Успешно обработано: <b>{stats.voice_processed_success}</b>\n"
         f"Ошибок обработки: <b>{stats.voice_processing_failed}</b>\n"
         f"Заблокировано лимитом: <b>{stats.voice_limit_blocked}</b>\n"
-        f"Минут аудио получено: <b>{stats.audio_minutes_received}</b>\n"
-        f"Минут успешно обработано: <b>{stats.audio_minutes_processed}</b>\n"
+        f"Минут аудио получено: <b>{stats.audio_minutes_received:.1f}</b>\n"
+        f"Минут успешно обработано: <b>{stats.audio_minutes_processed:.1f}</b>\n"
+        f"Среднее время обработки: <b>{stats.average_processing_time_seconds:.1f} сек</b>\n"
         f"Открытий истории: <b>{stats.history_opened}</b>\n"
         f"Открытий профиля: <b>{stats.profile_opened}</b>\n"
         f"Нажатий “Поделиться”: <b>{stats.share_clicked}</b>\n"
@@ -135,11 +144,17 @@ def format_admin_stats(stats: AdminStats, title: str) -> str:
         f"По-братски от Тоши: <b>{tariff_counts.get('brother', 0)}</b> активных\n"
         f"Owner: <b>{tariff_counts.get('owner', 0)}</b> активных\n\n"
         "Конверсии:\n"
-        f"Activation Rate: <b>{_format_percent(stats.activation_rate)}</b>\n"
-        f"Success Rate: <b>{_format_percent(stats.success_rate)}</b>\n"
-        f"Limit Block Rate: <b>{_format_percent(stats.limit_block_rate)}</b>\n"
-        f"Share Rate: <b>{_format_percent(stats.share_rate)}</b>"
+        f"Активация новых: <b>{_format_percent(stats.new_user_activation_rate)}</b>\n"
+        f"Голосовые от активных: <b>{_format_percent(stats.active_voice_rate)}</b>\n"
+        f"Успешная обработка: <b>{_format_percent(stats.success_rate)}</b>\n"
+        f"Блокировки лимитом: <b>{_format_percent(stats.limit_block_rate)}</b>\n"
+        f"Доля “Поделиться”: <b>{_format_percent(stats.share_rate)}</b>"
     )
+    if stats.error_counts:
+        text += "\n\nОшибки:\n" + _format_counts(stats.error_counts)
+    if stats.block_reason_counts:
+        text += "\n\nБлокировки:\n" + _format_counts(stats.block_reason_counts)
+    return text
 
 
 def period_title(period: str) -> str:
@@ -172,27 +187,41 @@ def _build_stats(events: list[AnalyticsEvent], start_date: datetime, end_date: d
     voice_processed_success = counts.get("voice_processed_success", 0)
     voice_limit_blocked = counts.get("voice_limit_blocked", 0)
     share_clicked = counts.get("share_clicked", 0)
+    new_user_ids = {
+        event.telegram_id for event in events if event.event_name == "user_started"
+    }
+    users_with_voice_ids = {
+        event.telegram_id for event in events if event.event_name == "voice_received"
+    }
 
     return AdminStats(
         start_date=start_date,
         end_date=end_date,
-        new_users=len({event.telegram_id for event in events if event.event_name == "user_started"}),
+        new_users=len(new_user_ids),
         active_users=len(active_user_ids),
+        users_with_voice=len(users_with_voice_ids),
         voice_received=voice_received,
         voice_processed_success=voice_processed_success,
         voice_processing_failed=counts.get("voice_processing_failed", 0),
         voice_limit_blocked=voice_limit_blocked,
         audio_minutes_received=_sum_minutes(events, "voice_received"),
         audio_minutes_processed=_sum_minutes(events, "voice_processed_success"),
+        average_processing_time_seconds=_average_processing_time(events),
         history_opened=counts.get("history_opened", 0),
         profile_opened=counts.get("profile_opened", 0),
         share_clicked=share_clicked,
         paywall_shown=counts.get("paywall_shown", 0),
         active_by_tariff={tariff: len(user_ids) for tariff, user_ids in active_by_tariff.items()},
-        activation_rate=_safe_ratio(voice_received, counts.get("user_started", 0)),
+        new_user_activation_rate=_safe_ratio(
+            len(new_user_ids & users_with_voice_ids),
+            len(new_user_ids),
+        ),
+        active_voice_rate=_safe_ratio(len(users_with_voice_ids), len(active_user_ids)),
         success_rate=_safe_ratio(voice_processed_success, voice_received),
         limit_block_rate=_safe_ratio(voice_limit_blocked, voice_received),
         share_rate=_safe_ratio(share_clicked, voice_processed_success),
+        error_counts=_payload_counts(events, "voice_processing_failed", "error_type"),
+        block_reason_counts=_payload_counts(events, "voice_limit_blocked", "reason"),
     )
 
 
@@ -203,14 +232,51 @@ def _event_counts(events: list[AnalyticsEvent]) -> dict[str, int]:
     return counts
 
 
-def _sum_minutes(events: list[AnalyticsEvent], event_name: str) -> int:
-    total_seconds = 0
+def _sum_minutes(events: list[AnalyticsEvent], event_name: str) -> float:
+    total_seconds = 0.0
     for event in events:
         if event.event_name != event_name:
             continue
         payload = _load_payload(event.payload_json)
-        total_seconds += int(payload.get("duration_seconds") or 0)
-    return round(total_seconds / 60)
+        total_seconds += _as_float(payload.get("duration_seconds"))
+    return total_seconds / 60
+
+
+def _average_processing_time(events: list[AnalyticsEvent]) -> float:
+    values = []
+    for event in events:
+        if event.event_name != "voice_processed_success":
+            continue
+        payload = _load_payload(event.payload_json)
+        value = _as_float(payload.get("processing_time_seconds"))
+        if value > 0:
+            values.append(value)
+    if not values:
+        return 0.0
+    return sum(values) / len(values)
+
+
+def _payload_counts(
+    events: list[AnalyticsEvent],
+    event_name: str,
+    payload_key: str,
+) -> dict[str, int]:
+    counter: Counter[str] = Counter()
+    for event in events:
+        if event.event_name != event_name:
+            continue
+        payload = _load_payload(event.payload_json)
+        value = payload.get(payload_key)
+        if isinstance(value, str) and value.strip():
+            counter[value.strip()] += 1
+    return dict(counter)
+
+
+def _format_counts(counts: dict[str, int]) -> str:
+    return "\n".join(
+        f"- {escape(key)}: <b>{value}</b>"
+        for key, value in sorted(counts.items())
+    )
 
 
 def _period_bounds(period: str) -> tuple[datetime, datetime]:
@@ -291,3 +357,14 @@ def _safe_ratio(numerator: int, denominator: int) -> float:
 
 def _format_percent(value: float) -> str:
     return f"{value * 100:.1f}%"
+
+
+def _as_float(value: Any) -> float:
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return 0.0
+    return 0.0

@@ -398,6 +398,16 @@ aggregate analytics_events
 format_admin_stats()
 ```
 
+`get_stats_for_period()` считает:
+
+- уникальных активных пользователей;
+- уникальных пользователей с `voice_received`;
+- минуты аудио как float, чтобы короткие voice не терялись при округлении;
+- среднее `processing_time_seconds` по `voice_processed_success`;
+- русскоязычные конверсии;
+- причины ошибок из `error_type`;
+- причины блокировок из `reason`.
+
 Периоды: `today`, `7d`, `30d`. Inline-кнопки `admin_stats:*` переключают период. `/admin_cleanup_analytics` удаляет события старше 90 дней только после подтверждения.
 
 ## Тестовый Контур

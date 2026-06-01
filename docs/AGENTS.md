@@ -214,6 +214,9 @@
 - не писать transcript, summary, tasks, OpenAI key, Telegram token или другие секреты в `payload_json`;
 - `track_event()` должен оставаться best-effort: ошибка аналитики логируется, но не ломает пользовательский сценарий;
 - новые события документировать в `docs/FEATURES.md` и `docs/ARCHITECTURE.md`.
+- admin stats форматируются в `app/analytics_service.py:format_admin_stats()`;
+- минуты в admin stats должны оставаться дробными, чтобы короткие voice не округлялись в 0;
+- блок конверсий в UI должен быть на русском.
 
 ### Если нужно изменить задачи
 
