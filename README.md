@@ -57,6 +57,7 @@ tests/               # минимальные unit-тесты
 - [`docs/FEATURES.md`](docs/FEATURES.md) — каталог реализованных функций
 - [`docs/AGENTS.md`](docs/AGENTS.md) — инструкция для AI-агентов: что читать перед изменениями
 - [`docs/DATABASE_MIGRATIONS.md`](docs/DATABASE_MIGRATIONS.md) — текущая SQLite-схема, ручные ALTER TABLE и план будущего Alembic
+- [`docs/DEPLOY_GUIDE.md`](docs/DEPLOY_GUIDE.md) — простая инструкция: GitHub → удалённый Mac → перезапуск бота
 
 ## Быстрый запуск локально
 
