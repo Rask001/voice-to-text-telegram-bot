@@ -40,6 +40,7 @@ class AccessServiceTests(unittest.TestCase):
 
         self.assertFalse(status.can_process)
         self.assertIn("Пробный период закончился", status.denial_reason or "")
+        self.assertEqual(status.denial_code, "trial_expired")
 
     def test_free_expired_by_total_minutes(self) -> None:
         with self.session_factory() as session:
@@ -51,6 +52,7 @@ class AccessServiceTests(unittest.TestCase):
 
         self.assertFalse(status.can_process)
         self.assertIn("Пробный период закончился", status.denial_reason or "")
+        self.assertEqual(status.denial_code, "trial_minutes_limit")
 
     def test_owner_always_passes(self) -> None:
         with self.session_factory() as session:
@@ -69,6 +71,7 @@ class AccessServiceTests(unittest.TestCase):
         self.assertEqual(ok_status.tariff_type, BROTHER)
         self.assertFalse(denied_status.can_process)
         self.assertIn("Голосовое слишком длинное", denied_status.denial_reason or "")
+        self.assertEqual(denied_status.denial_code, "voice_too_long")
 
     def test_daily_voice_limit_denies_free_user(self) -> None:
         with self.session_factory() as session:
@@ -81,6 +84,7 @@ class AccessServiceTests(unittest.TestCase):
 
         self.assertFalse(status.can_process)
         self.assertEqual(status.remaining_today, 0)
+        self.assertEqual(status.denial_code, "daily_voice_limit")
 
 
 if __name__ == "__main__":

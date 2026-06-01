@@ -76,6 +76,7 @@ def track_event(
                     telegram_id=telegram_id,
                     tariff_type=resolved_tariff,
                     payload_json=json.dumps(safe_payload, ensure_ascii=False),
+                    created_at=datetime.now(),
                 )
             )
             session.commit()
@@ -176,12 +177,7 @@ def _build_stats(events: list[AnalyticsEvent], start_date: datetime, end_date: d
             "paywall_shown",
         }
     }
-    active_by_tariff: dict[str, set[int]] = {}
-    for event in events:
-        if event.telegram_id not in active_user_ids:
-            continue
-        tariff = event.tariff_type or "unknown"
-        active_by_tariff.setdefault(tariff, set()).add(event.telegram_id)
+    active_by_tariff = _active_users_by_latest_tariff(events, active_user_ids)
 
     voice_received = counts.get("voice_received", 0)
     voice_processed_success = counts.get("voice_processed_success", 0)
@@ -211,7 +207,7 @@ def _build_stats(events: list[AnalyticsEvent], start_date: datetime, end_date: d
         profile_opened=counts.get("profile_opened", 0),
         share_clicked=share_clicked,
         paywall_shown=counts.get("paywall_shown", 0),
-        active_by_tariff={tariff: len(user_ids) for tariff, user_ids in active_by_tariff.items()},
+        active_by_tariff=active_by_tariff,
         new_user_activation_rate=_safe_ratio(
             len(new_user_ids & users_with_voice_ids),
             len(new_user_ids),
@@ -268,8 +264,53 @@ def _payload_counts(
         payload = _load_payload(event.payload_json)
         value = payload.get(payload_key)
         if isinstance(value, str) and value.strip():
-            counter[value.strip()] += 1
+            normalized = _normalize_block_reason(value) if payload_key == "reason" else value.strip()
+            counter[normalized] += 1
     return dict(counter)
+
+
+def _active_users_by_latest_tariff(
+    events: list[AnalyticsEvent],
+    active_user_ids: set[int],
+) -> dict[str, int]:
+    latest_tariff_by_user: dict[int, tuple[datetime, str]] = {}
+    for event in events:
+        if event.telegram_id not in active_user_ids:
+            continue
+        tariff = (event.tariff_type or "").strip()
+        if not tariff:
+            continue
+        created_at = event.created_at or datetime.min
+        current = latest_tariff_by_user.get(event.telegram_id)
+        if current is None or created_at >= current[0]:
+            latest_tariff_by_user[event.telegram_id] = (created_at, tariff)
+
+    counts: Counter[str] = Counter()
+    for _, tariff in latest_tariff_by_user.values():
+        counts[tariff] += 1
+    return dict(counts)
+
+
+def _normalize_block_reason(reason: str) -> str:
+    value = reason.strip()
+    lower = value.lower()
+    known_reasons = {
+        "daily_voice_limit",
+        "monthly_minutes_limit",
+        "trial_expired",
+        "trial_minutes_limit",
+        "voice_too_long",
+        "limit_exceeded",
+    }
+    if lower in known_reasons:
+        return lower
+    if "слишком длин" in lower:
+        return "voice_too_long"
+    if "пробн" in lower:
+        return "trial_expired"
+    if "лимит" in lower or "подписк" in lower:
+        return "limit_exceeded"
+    return value
 
 
 def _format_counts(counts: dict[str, int]) -> str:

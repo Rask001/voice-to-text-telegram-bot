@@ -12,8 +12,7 @@ MVP Telegram-бота на Python 3.12 и aiogram 3: принимает voice me
 - `/remind` для ручного создания напоминания
 - `/settings` для выбора формата ответа
 - `/health` для быстрой проверки бота, SQLite, ffmpeg и API key
-- `/admin_add_unlimited <telegram_id>` для ручного тарифа `По-братски от Тоши`
-- `/admin_stats` и быстрые периоды `/admin_stats_today`, `/admin_stats_7d`, `/admin_stats_30d`
+- owner-only админские команды: стартовый текст, тарифы, пользователи, статистика, health, backup и broadcast
 - постоянное нижнее меню Telegram через Reply Keyboard
 - прием Telegram `voice` messages
 - скачивание аудио во временный файл
@@ -38,6 +37,7 @@ MVP Telegram-бота на Python 3.12 и aiogram 3: принимает voice me
 app/
   access.py          # низкоуровневая логика доступа и списания лимитов
   access_service.py  # единая точка проверки доступа
+  admin_service.py   # бизнес-логика owner-only админки
   config.py          # env-настройки
   db.py              # SQLAlchemy engine/session
   analytics_service.py # локальная аналитика и admin stats
@@ -51,6 +51,7 @@ app/
   main.py            # точка входа
   models.py          # таблицы SQLite
   openai_service.py  # OpenAI transcription + analysis
+  runtime_state.py   # uptime и runtime-флаги
 data/                # SQLite база при локальном/Docker запуске
 tests/               # минимальные unit-тесты
 ```
@@ -236,15 +237,46 @@ UNLIMITED_USER_IDS=123456789,987654321,555555555
 Осталось сегодня: 10
 ```
 
-### Админ-команда
+### Админские команды
 
-Owner может добавить пользователя в тариф `По-братски от Тоши` без правки `.env`:
+Owner может управлять ботом прямо из Telegram. Обычный пользователь на любую админскую команду получает:
 
 ```text
-/admin_add_unlimited 123456789
+Команда доступна только владельцу бота.
 ```
 
-Команда сохраняет доступ в SQLite.
+Список:
+
+```text
+/admin_help или /ah
+/start_text
+/set_start_text
+/reset_start_text
+/user <telegram_id>
+/set_tariff <telegram_id> <free|standard|premium|friend|owner>
+/tf <telegram_id> <free|standard|premium|friend|owner>
+/add_friend <telegram_id>
+/bro <telegram_id>
+/remove_friend <telegram_id>
+/unbro <telegram_id>
+/admin_users
+/admin_users 20
+/admin_users tariff=free
+/admin_stats
+/stats
+/admin_health
+/admin_backup
+/admin_broadcast
+/cancel
+```
+
+`/start_text`, `/set_start_text` и `/reset_start_text` управляют приветственным текстом `/start`. Текст хранится в SQLite в таблице `app_config`; если настройки нет, используется дефолтный текст из кода.
+
+`/add_friend` и `/bro` назначают тариф `По-братски от Тоши`. `/remove_friend` и `/unbro` возвращают пользователя на Free. `/set_tariff` и `/tf` принимают тарифы `free`, `standard`, `premium`, `friend`, `owner`.
+
+`/admin_backup` создает локальную копию SQLite в папке `backups/` с именем вида `bot_backup_YYYY-MM-DD_HH-MM-SS.db`.
+
+Legacy-команда `/admin_add_unlimited <telegram_id>` также поддерживается и назначает тариф `По-братски от Тоши`.
 
 ## Free Limit
 
@@ -398,6 +430,11 @@ Telegram ID хранится в базе и используется для ли
 - статус
 - даты отправки, выполнения, отмены и обновления
 
+В `app_config` хранятся небольшие настройки бота:
+
+- `start_text` — кастомный текст команды `/start`, если owner изменил его через `/set_start_text`
+- дата последнего обновления настройки
+
 Аудиофайлы постоянно не хранятся. Бот скачивает voice message во временный файл, конвертирует через `ffmpeg`, отправляет в OpenAI и удаляет временные файлы после обработки.
 
 ## Аналитика
@@ -426,7 +463,7 @@ Telegram ID хранится в базе и используется для ли
 - `reminder_cancelled`
 - `reminder_snoozed`
 
-В аналитике хранится только служебная информация: Telegram ID, тариф, имя события, дата и короткий JSON payload. Полные тексты расшифровок, summary, задачи, OpenAI API key и Telegram token туда не пишутся.
+В аналитике хранится только служебная информация: Telegram ID, тариф, имя события, локальное время события и короткий JSON payload. Полные тексты расшифровок, summary, задачи, OpenAI API key и Telegram token туда не пишутся.
 
 Owner может открыть статистику:
 
@@ -445,7 +482,7 @@ Owner может открыть статистику:
 - блокировки лимитом;
 - доля “Поделиться”.
 
-Если за период есть ошибки или блокировки, `/admin_stats` дополнительно показывает причины из analytics payload: `error_type` и `reason`.
+Если за период есть ошибки или блокировки, `/admin_stats` дополнительно показывает причины из analytics payload: `error_type` и стабильный код `reason` (`daily_voice_limit`, `monthly_minutes_limit`, `trial_expired`, `trial_minutes_limit`, `voice_too_long`). Блок “По тарифам” считает каждого активного пользователя один раз — по последнему тарифу за выбранный период.
 
 Старые события можно удалить owner-командой:
 

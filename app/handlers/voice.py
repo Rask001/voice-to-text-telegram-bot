@@ -70,7 +70,7 @@ async def handle_voice(
             denial_reason = access_status.denial_reason or LIMIT_EXPIRED_MESSAGE
             limit_payload = {
                 "duration_seconds": duration_seconds,
-                "reason": denial_reason,
+                "reason": access_status.denial_code or "limit_exceeded",
                 "remaining_minutes": (
                     access_status.minutes_remaining_month
                     if access_status.minutes_remaining_month is not None

@@ -3,6 +3,7 @@ from aiogram.filters import CommandStart
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.admin_service import get_start_text
 from app.analytics_service import track_event
 from app.config import Settings
 from app.formatters import help_text
@@ -22,24 +23,10 @@ async def start(
     if message.from_user is not None:
         track_event(session_factory, "user_started", message.from_user, settings=settings)
 
-    await message.answer(
-        "Привет! Я <b>Voice to Text</b> — бот, который превращает голосовые "
-        "в нормальный текст.\n\n"
-        "Что умею:\n"
-        "🎙 Расшифровываю голосовые\n"
-        "🧠 Делаю краткое содержание\n"
-        "✅ Выделяю задачи\n"
-        "📌 Нахожу важные пункты\n"
-        "📄 Показываю полный текст отдельно\n\n"
-        "Как пользоваться:\n"
-        "1. Просто отправь мне голосовое.\n"
-        "2. Я сам расшифрую его.\n"
-        "3. Верну короткий результат.\n"
-        "4. Полный текст можно открыть кнопкой.\n\n"
-        "Бесплатно доступно: 3 голосовых сообщения в день.\n\n"
-        "Отправь голосовое — и погнали.",
-        reply_markup=main_keyboard(),
-    )
+    with session_factory() as session:
+        start_text = get_start_text(session)
+
+    await message.answer(start_text, reply_markup=main_keyboard())
 
 
 @router.callback_query(F.data.startswith("start:"))

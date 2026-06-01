@@ -474,12 +474,69 @@ Callback data:
 - `app/config.py`
 - `app/access.py`
 - `app/handlers/admin.py`
+- `app/admin_service.py`
 
 Ключевые функции:
 
 - `is_owner()`
 - `add_unlimited_user()`
 - `admin_add_unlimited()`
+- `set_user_tariff()`
+- `add_friend_tariff()`
+- `remove_friend_tariff()`
+
+## Расширенная Админка
+
+Описание: owner управляет ботом из Telegram без ручной правки `.env` и SQLite.
+
+Команды:
+
+- `/admin_help` или `/ah`
+- `/start_text`
+- `/set_start_text`
+- `/reset_start_text`
+- `/user <telegram_id>`
+- `/set_tariff <telegram_id> <free|standard|premium|friend|owner>`
+- `/tf <telegram_id> <free|standard|premium|friend|owner>`
+- `/add_friend <telegram_id>`
+- `/bro <telegram_id>`
+- `/remove_friend <telegram_id>`
+- `/unbro <telegram_id>`
+- `/admin_users`
+- `/admin_users 20`
+- `/admin_users tariff=free`
+- `/admin_stats`
+- `/stats`
+- `/admin_health`
+- `/admin_backup`
+- `/admin_broadcast`
+- `/cancel`
+
+Основные файлы:
+
+- `app/handlers/admin.py`
+- `app/admin_service.py`
+- `app/models.py`: `AppConfig`, `UserSettings`
+- `app/runtime_state.py`
+
+Ключевые функции:
+
+- `get_start_text()`, `set_start_text()`, `reset_start_text()`
+- `set_user_tariff()`, `add_friend_tariff()`, `remove_friend_tariff()`
+- `get_admin_user_info()`, `list_admin_users()`
+- `format_admin_health()`
+- `create_database_backup()`
+- `get_broadcast_user_ids()`
+
+Поведение:
+
+- все команды проверяют owner через существующий `is_owner()`;
+- non-owner получает `Команда доступна только владельцу бота.`;
+- стартовый текст хранится в SQLite `app_config` под ключом `start_text`;
+- если кастомный стартовый текст удален, `/start` использует дефолт из кода;
+- `friend` в командах соответствует внутреннему тарифу `brother`;
+- backup SQLite создается в `backups/`;
+- broadcast идет через FSM с подтверждением inline-кнопкой.
 
 ## Локальная Аналитика
 
@@ -536,6 +593,7 @@ Callback data:
 Команды:
 
 - `/admin_stats`
+- `/stats`
 - `/admin_stats_today`
 - `/admin_stats_7d`
 - `/admin_stats_30d`
@@ -554,11 +612,12 @@ Callback data:
 - ошибки и блокировки лимитом;
 - минуты аудио с одной цифрой после запятой;
 - среднее время обработки;
+- активные пользователи по тарифам, где каждый пользователь считается один раз по последнему тарифу за период;
 - открытия истории/профиля;
 - share clicks и paywall views;
 - конверсии на русском: активация новых, голосовые от активных, успешная обработка, блокировки лимитом, доля “Поделиться”;
 - причины ошибок по `error_type`;
-- причины блокировок по `reason`.
+- причины блокировок по стабильному `reason` code: `daily_voice_limit`, `monthly_minutes_limit`, `trial_expired`, `trial_minutes_limit`, `voice_too_long`.
 
 ## Health Check
 

@@ -167,6 +167,7 @@
   - `AnalyticsEvent` — локальные события использования бота;
   - `VoiceNote` — сохраненная расшифровка, summary, tasks, details, message ids;
   - `Reminder` — ручные и будущие task/history/AI напоминания;
+  - `AppConfig` — небольшие настройки бота, включая кастомный `/start`;
   - `UserSettings` — настройки пользователя, тариф, counters, trial/month limits.
 - Основные функции: нет.
 - Связи:
@@ -228,7 +229,7 @@
 - Основные функции:
   - `start()`;
   - `start_callback()`.
-- Связи: использует `main_keyboard()`, `help_text()`, `build_profile_text()`.
+- Связи: использует `main_keyboard()`, `help_text()`, `build_profile_text()`, `get_start_text()` из `app/admin_service.py`.
 
 ### `app/handlers/system.py`
 
@@ -289,14 +290,24 @@
 
 ### `app/handlers/admin.py`
 
-- Назначение: owner-only админские команды.
+- Назначение: owner-only админские команды и многошаговые FSM-сценарии.
+- Основные классы:
+  - `AdminStates` — ввод стартового текста, ввод/подтверждение broadcast.
 - Основные функции:
-  - `admin_add_unlimited()`.
+  - `admin_help()`;
+  - `start_text()`, `set_start_text_command()`, `start_text_received()`, `reset_start_text_command()`;
+  - `admin_user_info()`, `set_tariff_command()`, `add_friend_command()`, `remove_friend_command()`;
+  - `admin_users()`;
+  - `admin_health()`;
+  - `admin_backup()`;
+  - `admin_broadcast()`, `admin_broadcast_text_received()`, `admin_broadcast_confirm()`;
+  - `cancel_admin_mode()`;
+  - `admin_add_unlimited()`;
   - `admin_stats()`, `admin_stats_today()`, `admin_stats_7d()`, `admin_stats_30d()`;
   - `admin_stats_callback()`;
   - `admin_cleanup_analytics()`, `admin_cleanup_analytics_callback()`;
   - `is_owner_command_user()`.
-- Связи: использует `is_owner()` и `add_unlimited_user()` из `app/access.py`, статистику из `app/analytics_service.py`.
+- Связи: использует `is_owner()` и `add_unlimited_user()` из `app/access.py`, бизнес-логику из `app/admin_service.py`, статистику из `app/analytics_service.py`.
 
 ### `app/handlers/voice.py`
 
@@ -359,12 +370,33 @@
   - `format_admin_stats()` — форматирует owner-only отчет;
   - `_average_processing_time()` — считает среднее время обработки успешных voice;
   - `_payload_counts()` — считает причины ошибок и блокировок из payload;
+  - `_active_users_by_latest_tariff()` — считает каждого активного пользователя в одном, последнем за период тарифе;
+  - `_normalize_block_reason()` — нормализует legacy-тексты блокировок в стабильные reason codes;
   - `period_title()` — заголовок периода.
 - Связи:
   - использует `AnalyticsEvent` из `app/models.py`;
   - использует `check_user_access()` для определения тарифа на момент события;
   - вызывается из `app/handlers/start.py`, `profile.py`, `settings.py`, `history.py`, `menu.py`, `voice.py`, `callbacks.py`, `admin.py`;
   - не сохраняет расшифровки, summary, задачи или секреты.
+
+### `app/admin_service.py`
+
+- Назначение: бизнес-логика owner-only админки без Telegram orchestration.
+- Основные классы:
+  - `AdminUserInfo` — snapshot пользователя для `/user`.
+- Основные функции:
+  - `get_start_text()`, `set_start_text()`, `reset_start_text()`, `validate_start_text()`;
+  - `set_user_tariff()`, `add_friend_tariff()`, `remove_friend_tariff()`;
+  - `get_admin_user_info()`, `format_admin_user_info()`;
+  - `list_admin_users()`, `format_admin_users()`;
+  - `create_database_backup()`;
+  - `get_broadcast_user_ids()`;
+  - `format_admin_health()`.
+- Связи:
+  - работает с `AppConfig`, `UserSettings`, `VoiceNote`, `Reminder`, `AnalyticsEvent`;
+  - вызывается из `app/handlers/admin.py`;
+  - использует тарифы из `app/tariffs.py`;
+  - backup SQLite создает файлы в `backups/`.
 
 ### `app/reminder_service.py`
 
@@ -402,6 +434,17 @@
   - `parse_default_time()`;
   - `now_in_timezone()`.
 - Связи: используется ручным `/remind`; поддерживает кнопки времени, ручной ввод, команды вида `/remind завтра 14:30 заехать в автосервис`, разговорные относительные фразы `через минуту`/`через 10`/`минут через 15`/`через пол часа`/`через пару часов`, дни недели и текст вида `позвонить Соне в 21:21`. Читает настройки через handler: `DEFAULT_TIMEZONE` и `DEFAULT_REMINDER_TIME`.
+
+### `app/runtime_state.py`
+
+- Назначение: легкое runtime-состояние процесса.
+- Основные функции:
+  - `mark_reminder_scheduler_started()`;
+  - `uptime_seconds()`.
+- Основные данные:
+  - `APP_STARTED_AT`;
+  - `REMINDER_SCHEDULER_STARTED`.
+- Связи: вызывается из `app/main.py`, читается в `app/admin_service.py` для `/admin_health`.
 
 ### `app/tasks.py`
 
@@ -441,14 +484,14 @@
 
 - Назначение: низкоуровневые правила тарифного доступа, лимиты, owner/brother/free/standard/premium.
 - Основные классы:
-  - `AccessStatus` — snapshot доступа пользователя для `/profile` и проверок.
+  - `AccessStatus` — snapshot доступа пользователя для `/profile` и проверок, включая пользовательский `denial_reason` и машинный `denial_code` для аналитики.
 - Основные функции:
   - `is_owner()` — owner по `OWNER_TELEGRAM_ID` или username `aaios`;
   - `get_access_status()` — статус без учета конкретного voice duration;
   - `check_voice_access()` — проверка перед OpenAI: дневной лимит, длительность, месячные/total минуты, trial;
   - `record_voice_usage()` — списывает voice и минуты после успешной обработки;
   - `add_unlimited_user()` — добавляет пользователя в тариф `По-братски от Тоши`;
-  - internal helpers `_prepare_user_settings()`, `_resolve_tariff_type()`, `_reset_period_counters()`, `_apply_plan_limits()`, `_get_static_denial_reason()`, `_build_access_status()`, `_trial_days_left()`, `_billable_minutes()`.
+  - internal helpers `_prepare_user_settings()`, `_resolve_tariff_type()`, `_reset_period_counters()`, `_apply_plan_limits()`, `_get_static_denial()`, `_build_access_status()`, `_trial_days_left()`, `_billable_minutes()`.
 - Связи:
   - использует `UserSettings` через `app/preferences.py`;
   - не использует `DailyUsage` в актуальной логике лимитов;
@@ -580,6 +623,30 @@
   - owner имеет доступ к admin stats;
   - обычный пользователь не имеет доступ к admin stats.
 - Связи: использует `app/analytics_service.py`, `app/handlers/admin.py`, `app/models.py`.
+
+### `tests/test_admin_service.py`
+
+- Назначение: unit-тесты сервисной части админки.
+- Основные классы:
+  - `AdminServiceTests`.
+- Основные проверки:
+  - `set_start_text()` и `reset_start_text()`;
+  - `set_user_tariff()`;
+  - `add_friend_tariff()`;
+  - `remove_friend_tariff()`;
+  - `create_database_backup()`.
+- Связи: использует `app/admin_service.py`, временную SQLite базу и `app/models.py`.
+
+### `tests/test_admin_handlers.py`
+
+- Назначение: unit-тесты owner-only поведения админских handlers.
+- Основные классы:
+  - `AdminHandlerTests`.
+- Основные проверки:
+  - non-owner не видит `/admin_help`;
+  - owner видит `/admin_help`;
+  - `/cancel` сбрасывает активный FSM state.
+- Связи: использует `app/handlers/admin.py` и aiogram `MemoryStorage`.
 
 ### `tests/test_reminder_service.py`
 

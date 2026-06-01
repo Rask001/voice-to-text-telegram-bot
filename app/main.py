@@ -12,6 +12,7 @@ from app.db import create_session_factory
 from app.handlers import router
 from app.openai_service import OpenAIService
 from app.reminder_scheduler import run_reminder_scheduler
+from app.runtime_state import mark_reminder_scheduler_started
 
 
 async def main() -> None:
@@ -31,6 +32,7 @@ async def main() -> None:
     dp["openai_service"] = OpenAIService(settings)
 
     dp.include_router(router)
+    mark_reminder_scheduler_started()
     reminder_task = asyncio.create_task(
         run_reminder_scheduler(bot, session_factory, settings)
     )

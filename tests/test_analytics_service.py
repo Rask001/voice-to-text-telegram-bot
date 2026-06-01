@@ -32,6 +32,7 @@ class AnalyticsServiceTests(unittest.TestCase):
 
     def test_track_event_creates_event(self) -> None:
         user = SimpleNamespace(id=42, username="tester")
+        before = datetime.now()
 
         track_event(
             self.session_factory,
@@ -50,6 +51,8 @@ class AnalyticsServiceTests(unittest.TestCase):
         self.assertEqual(event.tariff_type, "free")
         self.assertEqual(payload["duration_seconds"], 125)
         self.assertNotIn("unknown", payload)
+        self.assertGreaterEqual(event.created_at, before)
+        self.assertLessEqual(event.created_at, datetime.now())
 
     def test_track_event_error_does_not_raise(self) -> None:
         def broken_session_factory():
@@ -140,6 +143,46 @@ class AnalyticsServiceTests(unittest.TestCase):
         self.assertEqual(stats.share_rate, 1)
         self.assertEqual(stats.error_counts, {"invalid_json": 1})
         self.assertEqual(stats.block_reason_counts, {"trial_expired": 1})
+        self.assertEqual(stats.active_by_tariff, {"free": 2, "standard": 1})
+
+    def test_active_by_tariff_uses_latest_tariff_per_user(self) -> None:
+        now = datetime.now()
+        with self.session_factory() as session:
+            session.add_all(
+                [
+                    AnalyticsEvent(
+                        event_name="voice_received",
+                        telegram_id=1,
+                        tariff_type="free",
+                        payload_json='{"duration_seconds": 10}',
+                        created_at=now,
+                    ),
+                    AnalyticsEvent(
+                        event_name="profile_opened",
+                        telegram_id=1,
+                        tariff_type="premium",
+                        payload_json="{}",
+                        created_at=now + timedelta(seconds=1),
+                    ),
+                    AnalyticsEvent(
+                        event_name="voice_received",
+                        telegram_id=2,
+                        tariff_type="free",
+                        payload_json='{"duration_seconds": 10}',
+                        created_at=now,
+                    ),
+                ]
+            )
+            session.commit()
+
+        stats = get_stats_for_period(
+            self.session_factory,
+            now - timedelta(minutes=1),
+            now + timedelta(minutes=1),
+        )
+
+        self.assertEqual(stats.active_users, 2)
+        self.assertEqual(stats.active_by_tariff, {"premium": 1, "free": 1})
 
     def test_admin_stats_format_uses_decimals_and_russian_conversions(self) -> None:
         now = datetime.now()
@@ -203,7 +246,7 @@ class AnalyticsServiceTests(unittest.TestCase):
                         event_name="voice_limit_blocked",
                         telegram_id=2,
                         tariff_type="free",
-                        payload_json='{"reason": "daily_limit"}',
+                        payload_json='{"reason": "❌ Ваш лимит закончился. Чтобы продолжить пользоваться ботом"}',
                         created_at=now,
                     ),
                 ]
@@ -220,7 +263,7 @@ class AnalyticsServiceTests(unittest.TestCase):
         self.assertIn("Ошибки:", text)
         self.assertIn("- openai_rate_limit: <b>1</b>", text)
         self.assertIn("Блокировки:", text)
-        self.assertIn("- daily_limit: <b>1</b>", text)
+        self.assertIn("- limit_exceeded: <b>1</b>", text)
 
     def test_metrics_do_not_fail_with_zero_values(self) -> None:
         now = datetime.now()

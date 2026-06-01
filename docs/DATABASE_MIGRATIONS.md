@@ -111,6 +111,20 @@ Legacy таблица старого дневного счетчика.
 - `cancelled`
 - `failed`
 
+### `app_config`
+
+Хранит небольшие настройки бота, которыми owner управляет из Telegram.
+
+Поля:
+
+- `key VARCHAR(120) PRIMARY KEY`
+- `value TEXT DEFAULT ''`
+- `updated_at DATETIME NULL`
+
+Сейчас используется ключ:
+
+- `start_text` — кастомный текст команды `/start`
+
 ## Ручные ALTER TABLE, Которые Уже Поддерживаются
 
 Файл: `app/db.py`, функция `_ensure_sqlite_schema_updates()`.
@@ -149,6 +163,8 @@ Legacy таблица старого дневного счетчика.
 
 Для `reminders` ручных `ALTER TABLE` пока нет: таблица создается через `Base.metadata.create_all()` как новая таблица.
 
+Для `app_config` ручных `ALTER TABLE` пока нет: таблица создается через `Base.metadata.create_all()` как новая таблица.
+
 ## Очистка Пользовательской Истории
 
 Для полной очистки прошлых обработок удаляются только строки из:
@@ -161,6 +177,7 @@ Legacy таблица старого дневного счетчика.
 - `daily_usage`
 - `analytics_events`
 - `reminders`
+- `app_config`
 - структура таблиц
 - `.env`
 - тарифы

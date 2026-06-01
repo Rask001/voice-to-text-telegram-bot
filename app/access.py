@@ -42,6 +42,7 @@ class AccessStatus:
     trial_days_left: int | None
     max_voice_seconds: int | None
     denial_reason: str | None = None
+    denial_code: str | None = None
 
 
 def is_owner(user_id: int, username: str | None, settings: Settings) -> bool:
@@ -58,13 +59,14 @@ def get_access_status(
 ) -> AccessStatus:
     user_settings = _prepare_user_settings(session, user_id, username, settings)
     plan = get_tariff(user_settings.tariff_type)
-    denial_reason = _get_static_denial_reason(user_settings, plan)
+    denial_reason, denial_code = _get_static_denial(user_settings, plan)
 
     return _build_access_status(
         user_settings=user_settings,
         plan=plan,
         can_process=denial_reason is None,
         denial_reason=denial_reason,
+        denial_code=denial_code,
     )
 
 
@@ -77,7 +79,7 @@ def check_voice_access(
 ) -> AccessStatus:
     user_settings = _prepare_user_settings(session, user_id, username, settings)
     plan = get_tariff(user_settings.tariff_type)
-    denial_reason = _get_static_denial_reason(user_settings, plan)
+    denial_reason, denial_code = _get_static_denial(user_settings, plan)
 
     if denial_reason is None and plan.max_voice_seconds is not None:
         if duration_seconds > plan.max_voice_seconds:
@@ -85,21 +87,25 @@ def check_voice_access(
                 "Голосовое слишком длинное для вашего тарифа. "
                 f"Максимум: {plan.max_voice_seconds // 60} мин."
             )
+            denial_code = "voice_too_long"
 
     used_minutes = _billable_minutes(duration_seconds)
     if denial_reason is None and plan.minutes_limit_month is not None:
         if user_settings.minutes_used_this_month + used_minutes > plan.minutes_limit_month:
             denial_reason = LIMIT_EXPIRED_MESSAGE
+            denial_code = "monthly_minutes_limit"
 
     if denial_reason is None and plan.minutes_limit_total is not None:
         if user_settings.minutes_used_total + used_minutes > plan.minutes_limit_total:
             denial_reason = TRIAL_EXPIRED_MESSAGE
+            denial_code = "trial_minutes_limit"
 
     return _build_access_status(
         user_settings=user_settings,
         plan=plan,
         can_process=denial_reason is None,
         denial_reason=denial_reason,
+        denial_code=denial_code,
     )
 
 
@@ -150,6 +156,8 @@ def _prepare_user_settings(session: Session, user_id: int, username: str | None,
 def _resolve_tariff_type(user_settings, user_id: int, username: str | None, settings: Settings) -> str:
     if is_owner(user_id, username, settings):
         return OWNER
+    if user_settings.tariff_type == OWNER:
+        return OWNER
     if user_id in settings.unlimited_user_ids or bool(user_settings.is_unlimited):
         return BROTHER
     if bool(user_settings.is_premium):
@@ -178,30 +186,36 @@ def _apply_plan_limits(user_settings, plan: TariffPlan) -> None:
     user_settings.minutes_limit_total = plan.minutes_limit_total or 0
 
 
-def _get_static_denial_reason(user_settings, plan: TariffPlan) -> str | None:
+def _get_static_denial(user_settings, plan: TariffPlan) -> tuple[str | None, str | None]:
     now = datetime.now()
 
     if plan.code == OWNER:
-        return None
+        return None, None
 
     if plan.code == FREE:
         if user_settings.trial_expires_at and now > user_settings.trial_expires_at:
-            return TRIAL_EXPIRED_MESSAGE
+            return TRIAL_EXPIRED_MESSAGE, "trial_expired"
         if user_settings.minutes_used_total >= (plan.minutes_limit_total or 0):
-            return TRIAL_EXPIRED_MESSAGE
+            return TRIAL_EXPIRED_MESSAGE, "trial_minutes_limit"
 
     if plan.daily_voice_limit is not None:
         if user_settings.voices_used_today >= plan.daily_voice_limit:
-            return LIMIT_EXPIRED_MESSAGE
+            return LIMIT_EXPIRED_MESSAGE, "daily_voice_limit"
 
     if plan.minutes_limit_month is not None:
         if user_settings.minutes_used_this_month >= plan.minutes_limit_month:
-            return LIMIT_EXPIRED_MESSAGE
+            return LIMIT_EXPIRED_MESSAGE, "monthly_minutes_limit"
 
-    return None
+    return None, None
 
 
-def _build_access_status(user_settings, plan: TariffPlan, can_process: bool, denial_reason: str | None) -> AccessStatus:
+def _build_access_status(
+    user_settings,
+    plan: TariffPlan,
+    can_process: bool,
+    denial_reason: str | None,
+    denial_code: str | None,
+) -> AccessStatus:
     trial_days_left = _trial_days_left(user_settings.trial_expires_at) if plan.code == FREE else None
     remaining_today = None
     if plan.daily_voice_limit is not None:
@@ -234,6 +248,7 @@ def _build_access_status(user_settings, plan: TariffPlan, can_process: bool, den
         trial_days_left=trial_days_left,
         max_voice_seconds=plan.max_voice_seconds,
         denial_reason=denial_reason,
+        denial_code=denial_code,
     )
 
 

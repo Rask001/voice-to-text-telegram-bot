@@ -75,7 +75,7 @@ async def reply_keyboard_handler(
                 "paywall_shown",
                 message.from_user,
                 {
-                    "reason": access_status.denial_reason or LIMIT_EXPIRED_MESSAGE,
+                    "reason": access_status.denial_code or "limit_exceeded",
                     "remaining_minutes": access_status.minutes_remaining_month,
                     "remaining_daily_messages": access_status.remaining_today,
                     "source": "new_voice_menu",

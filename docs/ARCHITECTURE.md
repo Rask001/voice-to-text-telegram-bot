@@ -144,6 +144,7 @@ handlers use session_factory per operation
 - `user_settings` — тариф, response mode, counters, trial/month limits;
 - `analytics_events` — локальные события использования и admin stats;
 - `reminders` — ручные и будущие task/history/AI напоминания;
+- `app_config` — небольшие настройки бота, включая owner-managed start text;
 - `daily_usage` — legacy дневной счетчик, сейчас не участвует в активной проверке тарифов.
 
 SQLite schema updates сделаны простыми `ALTER TABLE` в `app/db.py`. Это не полноценная миграционная система, но достаточно для текущего MVP. Текущая схема, уже поддержанные ручные миграции и план будущего Alembic описаны в `docs/DATABASE_MIGRATIONS.md`.
@@ -438,6 +439,65 @@ fallbacks.py  text and unsupported media
 
 `app/handlers.py` больше не существует. Внешний импорт `from app.handlers import router` сохранен за счет package-level `router` в `app/handlers/__init__.py`.
 
+## Поток Админских Команд
+
+Все расширенные админские команды живут в `app/handlers/admin.py`, а бизнес-логика вынесена в `app/admin_service.py`.
+
+```text
+Owner command
+↓
+app/handlers/admin.py
+↓
+is_owner(user.id, username, settings)
+↓
+admin_service function
+↓
+SQLite / filesystem / Telegram response
+```
+
+Non-owner получает единый ответ:
+
+```text
+Команда доступна только владельцу бота.
+```
+
+Стартовый текст:
+
+```text
+/set_start_text
+↓
+AdminStates.waiting_for_start_text
+↓
+validate length
+↓
+UPSERT app_config(key='start_text')
+↓
+/start reads get_start_text()
+```
+
+Если записи `start_text` нет, `/start` использует дефолтный текст из `app/admin_service.py`.
+
+Тарифы:
+
+```text
+/set_tariff <telegram_id> <tariff>
+↓
+normalize free/standard/premium/friend/owner
+↓
+update user_settings.tariff_type and compatibility flags
+↓
+access.py resolves plan through tariffs.py
+```
+
+`friend` — внешний alias для внутреннего тарифа `brother` / `По-братски от Тоши`. `/bro` и `/unbro` — короткие alias-команды.
+
+Service actions:
+
+- `/admin_users` читает `user_settings` и последнюю активность из `analytics_events`/`voice_notes`;
+- `/admin_health` проверяет SQLite, ffmpeg, OpenAI key, scheduler flag, pending/failed reminders, uptime, Python и диск;
+- `/admin_backup` копирует SQLite в `backups/bot_backup_YYYY-MM-DD_HH-MM-SS.db`;
+- `/admin_broadcast` проходит FSM: текст → подтверждение inline-кнопкой → отправка всем `user_settings.telegram_user_id` с небольшой паузой.
+
 ## Поток Аналитики
 
 ```text
@@ -449,7 +509,7 @@ sanitize payload
 ↓
 resolve tariff_type
 ↓
-INSERT analytics_events
+INSERT analytics_events with local created_at
 ```
 
 События пишутся локально в SQLite и не отправляются во внешние сервисы. Ошибка записи аналитики логируется, но не прерывает пользовательский сценарий.
@@ -498,9 +558,10 @@ format_admin_stats()
 - уникальных пользователей с `voice_received`;
 - минуты аудио как float, чтобы короткие voice не терялись при округлении;
 - среднее `processing_time_seconds` по `voice_processed_success`;
+- активных пользователей по тарифам: каждый пользователь считается один раз, по последнему `tariff_type` за период;
 - русскоязычные конверсии;
 - причины ошибок из `error_type`;
-- причины блокировок из `reason`.
+- причины блокировок из стабильного `reason` code: `daily_voice_limit`, `monthly_minutes_limit`, `trial_expired`, `trial_minutes_limit`, `voice_too_long`.
 
 Периоды: `today`, `7d`, `30d`. Inline-кнопки `admin_stats:*` переключают период. `/admin_cleanup_analytics` удаляет события старше 90 дней только после подтверждения.
 
