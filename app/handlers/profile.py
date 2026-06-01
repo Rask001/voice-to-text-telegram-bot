@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.analytics_service import track_event
 from app.access_service import check_user_access
 from app.config import Settings
-from app.formatters import format_profile
+from app.formatters import format_my_id, format_profile
 from app.handlers.keyboards import main_keyboard
 
 
@@ -33,6 +33,14 @@ async def profile(
         ),
         reply_markup=main_keyboard(),
     )
+
+
+@router.message(Command("my_id"))
+async def my_id(message: Message) -> None:
+    if message.from_user is None:
+        return
+
+    await message.answer(format_my_id(message.from_user.id), reply_markup=main_keyboard())
 
 
 def build_profile_text(

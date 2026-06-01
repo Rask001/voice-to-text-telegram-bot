@@ -242,11 +242,12 @@
 
 ### `app/handlers/profile.py`
 
-- Назначение: `/profile` и сборка текста профиля.
+- Назначение: `/profile`, `/my_id` и сборка текста профиля.
 - Основные функции:
   - `profile()`;
+  - `my_id()`;
   - `build_profile_text()`.
-- Связи: использует `check_user_access()` и `format_profile()`.
+- Связи: использует `check_user_access()`, `format_profile()`, `format_my_id()`.
 
 ### `app/handlers/help.py`
 
@@ -314,7 +315,7 @@
   - `format_response()` — выбирает short/full/tasks режим;
   - `format_short()`, `format_details()`, `format_tasks()`, `format_share()`;
   - `format_history()`, `format_history_item()`;
-  - `format_profile()`, `format_settings()`, `help_text()`;
+  - `format_profile()`, `format_my_id()`, `format_settings()`, `help_text()`;
   - `format_numbered_list()` — нумерованный список задач с priority-сортировкой;
   - `analysis_list()`, `fallback_title()`, `format_note_date()`, `trim()`, `trim_plain()`.
 - Связи:

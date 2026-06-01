@@ -156,6 +156,14 @@ def format_profile(
     )
 
 
+def format_my_id(telegram_id: int) -> str:
+    return (
+        "🆔 <b>Ваш Telegram ID</b>\n\n"
+        f"<code>{telegram_id}</code>\n\n"
+        "Отправьте этот ID Тоше, если он попросил."
+    )
+
+
 def help_text() -> str:
     return (
         "❓ <b>Помощь</b>\n\n"
@@ -163,6 +171,7 @@ def help_text() -> str:
         "Текст, фото, файлы, кружки и аудиофайлы пока не обрабатываю.\n\n"
         "История обработок: /history или кнопка 📚 История.\n"
         "Профиль и лимиты: /profile или кнопка 👤 Профиль.\n"
+        "Ваш Telegram ID: /my_id.\n"
         "📤 Поделиться создаёт отдельный блок, который удобно переслать вручную."
     )
 

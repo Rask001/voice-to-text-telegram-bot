@@ -303,9 +303,9 @@ Callback data:
 - `get_response_mode()`
 - `set_response_mode()`
 
-## Профиль `/profile`
+## Профиль `/profile` и Telegram ID `/my_id`
 
-Описание: показывает имя, username, тариф, дневные и минутные лимиты, trial days, reset date.
+Описание: `/profile` показывает имя, username, тариф, дневные и минутные лимиты, trial days, reset date. `/my_id` показывает Telegram ID пользователя, чтобы он мог отправить его Тоше для ручного добавления в тариф.
 
 Основные файлы:
 
@@ -319,8 +319,10 @@ Callback data:
 Ключевые функции:
 
 - `profile()`
+- `my_id()`
 - `build_profile_text()`
 - `format_profile()`
+- `format_my_id()`
 - `check_user_access()`
 
 ## Тарифы

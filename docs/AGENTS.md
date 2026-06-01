@@ -150,15 +150,15 @@
 
 Читать:
 
-- `app/handlers/profile.py`: `profile()`, `build_profile_text()`;
-- `app/formatters.py`: `format_profile()`;
+- `app/handlers/profile.py`: `profile()`, `my_id()`, `build_profile_text()`;
+- `app/formatters.py`: `format_profile()`, `format_my_id()`;
 - `app/access_service.py`: `check_user_access()`;
 - `app/access.py`: `AccessStatus`;
 - `app/tariffs.py`.
 
 Важно:
 
-- Telegram ID сейчас не показывается пользователю в UI;
+- Telegram ID не показывается в `/profile`, но доступен отдельной командой `/my_id`;
 - owner/friends логика остается внутренней.
 
 ### Если нужно изменить тарифы
