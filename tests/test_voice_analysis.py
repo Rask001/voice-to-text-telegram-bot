@@ -15,6 +15,11 @@ from app.voice_analysis import (
     water_class,
 )
 from app.voice_metrics_service import build_voice_analysis
+from app.voice_metrics_service import (
+    calculate_final_metrics,
+    calculate_pre_metrics,
+    sanitize_ai_meme_by_metrics,
+)
 
 
 class VoiceAnalysisTests(unittest.TestCase):
@@ -75,8 +80,8 @@ class VoiceAnalysisTests(unittest.TestCase):
 
         self.assertLessEqual(concise["voice_type_level"], 3)
         self.assertIn(voice_type(concise["voice_type_level"]), {"Деловой человек", "По существу"})
-        self.assertGreaterEqual(verbose["voice_type_level"], 8)
-        self.assertNotEqual(voice_type(verbose["voice_type_level"]), "Подкастер")
+        self.assertEqual(verbose["voice_type_level"], 8)
+        self.assertEqual(voice_type(verbose["voice_type_level"]), "Аудиокнига")
 
     def test_water_level_is_consistent_with_water_percent(self) -> None:
         dry = normalize_voice_analysis(
@@ -94,10 +99,10 @@ class VoiceAnalysisTests(unittest.TestCase):
             duration_seconds=60,
         )
 
-        self.assertEqual(dry["water_level"], 1)
-        self.assertEqual(water_class(dry["water_level"])[1], "Пустыня — Сухо и эффективно.")
-        self.assertEqual(wet["water_level"], 9)
-        self.assertIn("Атлантический океан", water_class(wet["water_level"])[1])
+        self.assertEqual(dry["water_level"], 2)
+        self.assertEqual(water_class(dry["water_level"])[1], "Засуха — Воды почти нет.")
+        self.assertEqual(wet["water_level"], 8)
+        self.assertIn("Наводнение", water_class(wet["water_level"])[1])
 
     def test_rare_title_only_for_high_water_or_wordiness(self) -> None:
         low = normalize_voice_analysis(
@@ -135,6 +140,7 @@ class VoiceAnalysisTests(unittest.TestCase):
         self.assertIn("Голосовое стало подкастом.", rendered)
         self.assertIn("\n😂\nГолосовое стало подкастом.", rendered)
         self.assertNotIn("Мем:", rendered)
+        self.assertTrue(rendered.endswith("@voitext_bot"))
 
     def test_share_block_contains_meme(self) -> None:
         analysis = normalize_voice_analysis(
@@ -232,14 +238,165 @@ class VoiceAnalysisTests(unittest.TestCase):
 
         self.assertEqual(analysis["duration_seconds"], 180)
         self.assertGreaterEqual(analysis["water_percent"], 0)
-        self.assertLessEqual(analysis["water_percent"], 100)
+        self.assertLessEqual(analysis["water_percent"], 95)
         self.assertEqual(
             analysis["saved_seconds"],
             analysis["duration_seconds"] - analysis["meaningful_duration_seconds"],
         )
+        self.assertIn("word_count", analysis)
+        self.assertIn("compression_ratio", analysis)
         self.assertEqual(analysis["memorable_quote"], "короче")
         self.assertEqual(analysis["verdict"], "Суть выжила после вступления.")
         self.assertIn("драматургию", analysis["meme"])
+
+    def test_wordiness_for_short_dense_message_is_capped(self) -> None:
+        metrics = calculate_pre_metrics(" ".join(["слово"] * 40), duration_seconds=18)
+
+        self.assertLessEqual(metrics["wordiness_score"], 2.0)
+
+    def test_wordiness_for_long_dense_message_is_high(self) -> None:
+        metrics = calculate_pre_metrics(" ".join(["слово"] * 800), duration_seconds=300)
+
+        self.assertGreaterEqual(metrics["wordiness_score"], 8.0)
+
+    def test_wordiness_for_long_sparse_message_is_not_high(self) -> None:
+        metrics = calculate_pre_metrics(" ".join(["слово"] * 80), duration_seconds=300)
+
+        self.assertLessEqual(metrics["wordiness_score"], 2.5)
+
+    def test_water_for_short_message_is_capped(self) -> None:
+        metrics = calculate_final_metrics(
+            transcription=" ".join(["слово"] * 40),
+            duration_seconds=18,
+            summary="короткая суть",
+            tasks=[],
+            details="",
+            important_points=[],
+        )
+
+        self.assertLessEqual(metrics["water_percent"], 25)
+        self.assertEqual(metrics["meaningful_duration_seconds"], 18)
+
+    def test_water_is_based_on_compression_ratio(self) -> None:
+        metrics = calculate_final_metrics(
+            transcription=" ".join(["слово"] * 200),
+            duration_seconds=180,
+            summary=" ".join(["суть"] * 40),
+            tasks=[],
+            details="",
+            important_points=[],
+        )
+
+        self.assertAlmostEqual(metrics["compression_ratio"], 0.2, places=2)
+        self.assertEqual(metrics["water_percent"], 80)
+
+    def test_useful_text_does_not_include_transcription_and_details_are_weighted(self) -> None:
+        metrics = calculate_final_metrics(
+            transcription=" ".join(["исходник"] * 100),
+            duration_seconds=120,
+            summary="",
+            tasks=[],
+            details=" ".join(["подробность"] * 100),
+            important_points=[],
+        )
+
+        self.assertEqual(metrics["useful_word_count"], 25.0)
+        self.assertAlmostEqual(metrics["compression_ratio"], 0.25, places=2)
+
+    def test_meaningful_duration_and_saved_seconds_are_safe(self) -> None:
+        metrics = calculate_final_metrics(
+            transcription=" ".join(["слово"] * 10),
+            duration_seconds=20,
+            summary=" ".join(["суть"] * 100),
+            tasks=[],
+            details="",
+            important_points=[],
+        )
+
+        self.assertLessEqual(metrics["meaningful_duration_seconds"], metrics["duration_seconds"])
+        self.assertGreaterEqual(metrics["saved_seconds"], 0)
+
+    def test_voice_type_is_capped_for_short_messages(self) -> None:
+        short = calculate_final_metrics(
+            transcription=" ".join(["слово"] * 40),
+            duration_seconds=18,
+            summary="суть",
+            tasks=[],
+            details="",
+            important_points=[],
+        )
+        under_minute = calculate_final_metrics(
+            transcription=" ".join(["слово"] * 120),
+            duration_seconds=50,
+            summary="суть",
+            tasks=[],
+            details="",
+            important_points=[],
+        )
+
+        self.assertLessEqual(short["voice_type_level"], 2)
+        self.assertLessEqual(under_minute["voice_type_level"], 3)
+
+    def test_quality_for_short_dry_message_is_high(self) -> None:
+        metrics = calculate_final_metrics(
+            transcription="проверить бота",
+            duration_seconds=10,
+            summary="Проверить бота.",
+            tasks=[{"text": "Проверить бота", "priority": False}],
+            details="",
+            important_points=[],
+        )
+
+        self.assertGreaterEqual(metrics["quality_score"], 8.0)
+
+    def test_consistency_replaces_low_water_conflict(self) -> None:
+        metrics = {
+            "duration_seconds": 20,
+            "water_percent": 10,
+            "wordiness_score": 1.5,
+            "quality_score": 9.0,
+        }
+
+        verdict, meme = sanitize_ai_meme_by_metrics(
+            verdict="Тут много воды и почти аудиокнига.",
+            meme="Голосовое стало подкастом.",
+            metrics=metrics,
+        )
+
+        self.assertIn("коротко", verdict)
+        self.assertNotIn("подкаст", meme.lower())
+
+    def test_consistency_replaces_short_duration_conflict(self) -> None:
+        metrics = {
+            "duration_seconds": 18,
+            "water_percent": 30,
+            "wordiness_score": 2.5,
+            "quality_score": 8.0,
+        }
+
+        _, meme = sanitize_ai_meme_by_metrics(
+            verdict="Нормально.",
+            meme="Это длинное голосовое внезапно стало сериалом.",
+            metrics=metrics,
+        )
+
+        self.assertNotIn("сериал", meme.lower())
+
+    def test_consistency_replaces_bad_verdict_for_high_quality(self) -> None:
+        metrics = {
+            "duration_seconds": 20,
+            "water_percent": 10,
+            "wordiness_score": 1.5,
+            "quality_score": 9.0,
+        }
+
+        verdict, _ = sanitize_ai_meme_by_metrics(
+            verdict="Сообщение плохое и водянистое.",
+            meme="Коротко.",
+            metrics=metrics,
+        )
+
+        self.assertNotIn("плох", verdict.lower())
 
 
 if __name__ == "__main__":

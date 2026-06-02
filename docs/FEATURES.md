@@ -267,7 +267,7 @@ Callback data:
 
 ## DeepSeek Summary, Details, Tasks
 
-Описание: transcript анализируется DeepSeek, ожидается structured JSON для UI.
+Описание: transcript и предварительные локальные метрики анализируются DeepSeek, ожидается structured JSON для UI.
 
 Основные файлы:
 
@@ -283,6 +283,13 @@ Callback data:
 - `_extract_json()`
 - `_as_string_list()`
 - `normalize_tasks()`
+
+Правила:
+
+- `TextAnalysisService.analyze()` получает `pre_metrics` от `voice_metrics_service.calculate_pre_metrics()`;
+- prompt передает DeepSeek `duration_seconds`, `word_count`, `words_per_minute`, rough `wordiness_score`;
+- prompt говорит, что локальные метрики — источник истины, и запрещает creative text, который спорит с длительностью, водой, многословностью или качеством;
+- DeepSeek не возвращает численные voice metrics.
 
 Fallback:
 
@@ -330,12 +337,16 @@ Callback data:
 - отдельный OpenAI-запрос не делается;
 - OpenAI вообще не генерирует meme/verdict;
 - DeepSeek генерирует только текстовые творческие поля `memorable_quote`, `verdict`, `meme`;
-- локальный сервер считает длительность, содержательную часть, индекс воды, многословность, тип, оценку, `saved_seconds` и rare title;
+- локальный сервер считает `word_count`, `words_per_minute`, `useful_word_count`, `compression_ratio`, содержательную часть, индекс воды, многословность, тип, оценку, `saved_seconds` и rare title;
+- `useful_word_count` считается из `summary + tasks + important_points + details * 0.25`; полный transcript не входит в полезный текст;
+- вода считается через compression ratio, а не через длительность или скорость речи;
+- многословность считается через word count, duration и speech rate; короткие сообщения до 30 секунд не могут получить высокий тип голосового;
 - мем должен быть коротким, жёстко саркастичным, циничным и пересылаемым;
 - можно высмеивать длину, воду, драматургию, формат и фразы вроде `короче`, но нельзя переходить на личность автора;
 - запрещены мат, угрозы, травля, унижения, оскорбления личности и чувствительные признаки;
 - нормализатор заменяет очевидно токсичный meme на безопасный fallback;
-- `voice_type_level` нормализуется из `wordiness_score`, `water_percent` и длительности, чтобы низкая многословность не показывала тип `Подкастер`;
+- `sanitize_ai_meme_by_metrics()` заменяет verdict/meme, если AI шутит про воду, сериал, подкаст или аудиокнигу при низкой воде, короткой длительности или высокой оценке;
+- `voice_type_level` нормализуется из `wordiness_score`, длительности и word count, чтобы низкая многословность не показывала тип `Подкастер`;
 - `water_level` нормализуется из `water_percent`, чтобы класс воды не конфликтовал с индексом воды;
 - редкие титулы появляются только при `wordiness_score >= 9.5` или `water_percent >= 90`;
 - старые записи без `voice_analysis_json` открываются через fallback без ошибки;

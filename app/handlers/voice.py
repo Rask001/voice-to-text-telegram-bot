@@ -38,7 +38,7 @@ from app.tasks import normalize_tasks, serialize_tasks
 from app.text_analysis_service import TextAnalysisError, TextAnalysisService
 from app.transcription_service import OpenAIInsufficientQuotaError, TranscriptionService
 from app.voice_analysis import fallback_voice_analysis, serialize_voice_analysis
-from app.voice_metrics_service import build_voice_analysis
+from app.voice_metrics_service import build_voice_analysis, calculate_pre_metrics
 
 
 router = Router()
@@ -171,8 +171,13 @@ async def handle_voice(
             tariff_type=current_tariff_type,
         )
 
+        pre_metrics = calculate_pre_metrics(transcript, duration_seconds)
         try:
-            analysis = await asyncio.to_thread(text_analysis_service.analyze, transcript)
+            analysis = await asyncio.to_thread(
+                text_analysis_service.analyze,
+                transcript,
+                pre_metrics,
+            )
         except TextAnalysisError as exc:
             await _stop_progress_updates(progress_task)
             note_id = _save_transcription_without_analysis(

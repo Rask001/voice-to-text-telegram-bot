@@ -39,11 +39,15 @@ class TextAnalysisService:
     def __init__(self, client: TextAnalysisClient) -> None:
         self._client = client
 
-    def analyze(self, transcript: str) -> TextAnalysisResult:
+    def analyze(
+        self,
+        transcript: str,
+        pre_metrics: dict[str, object] | None = None,
+    ) -> TextAnalysisResult:
         try:
             raw_text = self._client.analyze_text(
                 _analysis_system_prompt(),
-                _analysis_user_prompt(transcript),
+                _analysis_user_prompt(transcript, pre_metrics),
             )
         except Exception as exc:
             raise TextAnalysisError("DeepSeek text analysis failed") from exc
@@ -100,6 +104,13 @@ def _analysis_system_prompt() -> str:
         "memorable_quote, verdict, meme. "
         "Не возвращай технические числа, уровни, длительности, оценки или проценты: "
         "их считает локальный сервер. "
+        "Метрики голосового сообщения рассчитаны локально и являются источником истины. "
+        "Не рассчитывай их самостоятельно и не противоречь им. "
+        "Если duration_seconds маленький — не шути про длинное голосовое, подкаст, аудиокнигу или сериал. "
+        "Если wordiness_score низкий — не шути про многословность. "
+        "Если water_percent низкий или неизвестен — не утверждай, что в сообщении много воды. "
+        "Если quality_score высокий — не делай вид, что сообщение плохое. "
+        "Шутка должна соответствовать переданным метрикам. "
         "Для verdict и meme сделай тон заметно жёстче, смешнее и вируснее. "
         "Тон: жёсткий сарказм, цинично, коротко, мемно, без канцелярита и без бережной душнины. "
         "Пиши так, чтобы результат хотелось переслать автору голосового. "
@@ -117,8 +128,18 @@ def _analysis_system_prompt() -> str:
     )
 
 
-def _analysis_user_prompt(transcript: str) -> str:
-    return f"Дословная расшифровка:\n{transcript}"
+def _analysis_user_prompt(
+    transcript: str,
+    pre_metrics: dict[str, object] | None = None,
+) -> str:
+    payload: dict[str, object] = {"transcription": transcript}
+    if pre_metrics:
+        payload["voice_metrics"] = pre_metrics
+    return (
+        "Данные для анализа. Метрики voice_metrics уже посчитаны локально, "
+        "не меняй и не пересчитывай их:\n"
+        f"{json.dumps(payload, ensure_ascii=False)}"
+    )
 
 
 def _as_string_list(value: object) -> list[str]:

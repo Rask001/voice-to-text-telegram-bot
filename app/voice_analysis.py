@@ -1,15 +1,21 @@
 import json
 from hashlib import sha1
-from typing import Any, TypedDict
+from typing import Any, NotRequired, TypedDict
 
 
 class VoiceAnalysis(TypedDict):
     duration_seconds: int
+    word_count: NotRequired[int]
+    words_per_minute: NotRequired[float]
+    useful_word_count: NotRequired[float]
+    compression_ratio: NotRequired[float]
     meaningful_duration_seconds: int
     water_percent: int
+    water_class: NotRequired[str]
     wordiness_score: float
     quality_score: float
     voice_type_level: int
+    voice_type: NotRequired[str]
     water_level: int
     verdict_level: int
     verdict: str
@@ -22,14 +28,14 @@ class VoiceAnalysis(TypedDict):
 WATER_CLASSES = {
     1: ("🏜", "Пустыня — Сухо и эффективно."),
     2: ("🌵", "Засуха — Воды почти нет."),
-    3: ("💧", "Роса — Небольшие следы многословности."),
-    4: ("🚿", "Душ — Иногда отвлекался от темы."),
-    5: ("🌦", "Морось — Уже заметно."),
+    3: ("💧", "Роса — Небольшие следы воды."),
+    4: ("🚿", "Душ — Иногда отвлекался от сути."),
+    5: ("🌦", "Морось — Воды уже заметно."),
     6: ("🌧", "Дождь — Суть начинает намокать."),
     7: ("⛈", "Ливень — Нужен зонт."),
-    8: ("🌊", "Наводнение — Смысл местами скрывается под водой."),
+    8: ("🌊", "Наводнение — Смысл местами под водой."),
     9: ("🚢", "Атлантический океан — До сути пришлось плыть."),
-    10: ("🌊", "Байкал — Самое глубокое голосовое на планете."),
+    10: ("🌊", "Байкал — Самое глубокое голосовое."),
 }
 
 VOICE_TYPES = {
@@ -63,13 +69,14 @@ def normalize_voice_analysis(value: object, duration_seconds: int) -> VoiceAnaly
     data = value if isinstance(value, dict) else {}
     meaningful_duration = _as_int(data.get("meaningful_duration_seconds"), duration_seconds)
     meaningful_duration = max(0, min(meaningful_duration, duration_seconds))
-    water_percent = _clamp(_as_int(data.get("water_percent"), 0), 0, 100)
-    wordiness_score = _clamp_float(_as_float(data.get("wordiness_score"), 1.0), 0.0, 10.0)
-    quality_score = _clamp_float(_as_float(data.get("quality_score"), 5.0), 0.0, 10.0)
+    water_percent = _clamp(_as_int(data.get("water_percent"), 0), 0, 95)
+    wordiness_score = _clamp_float(_as_float(data.get("wordiness_score"), 1.0), 1.0, 10.0)
+    quality_score = _clamp_float(_as_float(data.get("quality_score"), 5.0), 1.0, 10.0)
+    word_count = _as_int(data.get("word_count"), -1)
     voice_type_level = _voice_type_level_from_metrics(
         wordiness_score,
-        water_percent,
         duration_seconds,
+        word_count if word_count >= 0 else None,
     )
     water_level = _level_from_percent(water_percent)
     verdict_level = _clamp(
@@ -90,14 +97,16 @@ def normalize_voice_analysis(value: object, duration_seconds: int) -> VoiceAnaly
     if not rare_title and _rare_title_allowed(water_percent, wordiness_score):
         rare_title = _pick_rare_title(meme + quote + str(duration_seconds))
 
-    return {
+    result: VoiceAnalysis = {
         "duration_seconds": duration_seconds,
         "meaningful_duration_seconds": meaningful_duration,
         "water_percent": water_percent,
         "wordiness_score": round(wordiness_score, 1),
         "quality_score": round(quality_score, 1),
         "voice_type_level": voice_type_level,
+        "voice_type": voice_type(voice_type_level),
         "water_level": water_level,
+        "water_class": water_class(water_level)[1],
         "verdict_level": verdict_level,
         "verdict": verdict,
         "memorable_quote": quote,
@@ -105,6 +114,24 @@ def normalize_voice_analysis(value: object, duration_seconds: int) -> VoiceAnaly
         "rare_title": rare_title,
         "saved_seconds": saved_seconds,
     }
+    if word_count >= 0:
+        result["word_count"] = word_count
+    if "words_per_minute" in data:
+        result["words_per_minute"] = round(
+            _clamp_float(_as_float(data.get("words_per_minute"), 0.0), 0.0, 1000.0),
+            1,
+        )
+    if "useful_word_count" in data:
+        result["useful_word_count"] = round(
+            _clamp_float(_as_float(data.get("useful_word_count"), 0.0), 0.0, 100000.0),
+            1,
+        )
+    if "compression_ratio" in data:
+        result["compression_ratio"] = round(
+            _clamp_float(_as_float(data.get("compression_ratio"), 0.0), 0.0, 1.0),
+            3,
+        )
+    return result
 
 
 def fallback_voice_analysis(duration_seconds: int) -> VoiceAnalysis:
@@ -178,7 +205,25 @@ def _pick_rare_title(seed: str) -> str:
 
 
 def _level_from_percent(value: int) -> int:
-    return _clamp(round(value / 10) or 1, 1, 10)
+    if value <= 10:
+        return 1
+    if value <= 20:
+        return 2
+    if value <= 30:
+        return 3
+    if value <= 45:
+        return 4
+    if value <= 60:
+        return 5
+    if value <= 70:
+        return 6
+    if value <= 80:
+        return 7
+    if value <= 88:
+        return 8
+    if value <= 94:
+        return 9
+    return 10
 
 
 def _level_from_score(value: float) -> int:
@@ -187,23 +232,37 @@ def _level_from_score(value: float) -> int:
 
 def _voice_type_level_from_metrics(
     wordiness_score: float,
-    water_percent: int,
     duration_seconds: int,
+    word_count: int | None,
 ) -> int:
-    base = _level_from_score(wordiness_score)
-    if wordiness_score <= 3.0:
-        return _clamp(base, 1, 3)
-    if wordiness_score <= 5.0:
-        return _clamp(base, 3, 5)
-    if base >= 9:
-        return base
+    if wordiness_score < 2.0:
+        level = 1
+    elif wordiness_score < 3.0:
+        level = 2
+    elif wordiness_score < 4.0:
+        level = 3
+    elif wordiness_score < 5.0:
+        level = 4
+    elif wordiness_score < 6.0:
+        level = 5
+    elif wordiness_score < 7.0:
+        level = 6
+    elif wordiness_score < 8.0:
+        level = 7
+    elif wordiness_score < 8.8:
+        level = 8
+    elif wordiness_score < 9.5:
+        level = 9
+    else:
+        level = 10
 
-    bump = 0
-    if duration_seconds >= 300:
-        bump += 1
-    if water_percent >= 80:
-        bump += 1
-    return _clamp(base + bump, 6, 10)
+    if duration_seconds < 60:
+        level = min(level, 3)
+    if duration_seconds < 30:
+        level = min(level, 2)
+    if word_count is not None and word_count < 50:
+        level = min(level, 2)
+    return _clamp(level, 1, 10)
 
 
 def _as_int(value: Any, default: int) -> int:

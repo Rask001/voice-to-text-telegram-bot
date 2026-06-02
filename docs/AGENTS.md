@@ -71,6 +71,8 @@
 - OpenAI используется только для audio transcription;
 - DeepSeek используется для `summary`, `tasks`, `details`, `important_points`, `verdict`, `meme`, `memorable_quote`;
 - локальные метрики считаются в `app/voice_metrics_service.py`;
+- `calculate_pre_metrics()` передает DeepSeek `duration_seconds`, `word_count`, `words_per_minute`, `wordiness_score`;
+- DeepSeek prompt должен содержать правило: локальные метрики — источник истины;
 - JSON keys, которые ожидают `app/text_analysis_service.py`, `app/tasks.py`, `app/handlers/voice.py`;
 - fallback на invalid JSON;
 - обратную совместимость `action_items`/`tasks`.
@@ -150,12 +152,16 @@
 - не делать отдельный OpenAI-запрос;
 - OpenAI не должен получать prompt для meme/verdict;
 - DeepSeek генерирует только `verdict`, `meme`, `memorable_quote`;
-- `duration`, `water_percent`, `wordiness_score`, `quality_score`, `saved_seconds`, уровни и редкий титул считает локальный `voice_metrics_service`;
+- `duration`, `word_count`, `words_per_minute`, `useful_word_count`, `compression_ratio`, `water_percent`, `wordiness_score`, `quality_score`, `saved_seconds`, уровни и редкий титул считает локальный `voice_metrics_service`;
+- вода и многословность считаются отдельно: вода через compression ratio, многословность через duration/word count/speech rate;
+- `useful_word_count` не должен включать transcript/full_text; details учитывается максимум с весом `0.25`;
+- `sanitize_ai_meme_by_metrics()` должен заменять DeepSeek verdict/meme, если они спорят с локальными метриками;
 - старые записи без `voice_analysis_json` должны открываться через fallback;
 - history callbacks не должны вызывать OpenAI;
 - `saved_seconds` всегда `max(0, duration - meaningful_duration)`;
 - `total_saved_seconds` увеличивается после успешной новой обработки;
 - `voice_type_level` должен оставаться согласованным с `wordiness_score`, а `water_level` — с `water_percent`;
+- короткое сообщение до 30 секунд не должно становиться `Подкастером`, `Аудиокнигой` или `Режиссёрской версией`;
 - мем должен быть жёстким, цинично-саркастичным и пересылаемым, но без мата, унижений и оскорблений личности;
 - шутка должна бить по формату голосового, а не по человеку;
 - share-блок должен содержать короткую вирусную версию анализа.

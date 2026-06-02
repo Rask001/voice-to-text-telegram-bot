@@ -10,7 +10,7 @@ from app.openai_service import OpenAIService
 from app.text_analysis_service import TextAnalysisError, TextAnalysisService
 from app.transcription_service import TranscriptionService
 from app.voice_analysis import parse_voice_analysis_json
-from app.voice_metrics_service import build_voice_analysis
+from app.voice_metrics_service import build_voice_analysis, calculate_pre_metrics
 
 
 class FakeTranscriptionClient:
@@ -64,7 +64,13 @@ class AIPipelineTests(unittest.TestCase):
         )
         service = TextAnalysisService(client)
 
-        result = service.analyze("короче нужно проверить бота")
+        pre_metrics = {
+            "duration_seconds": 18,
+            "word_count": 4,
+            "words_per_minute": 13.3,
+            "wordiness_score": 1.4,
+        }
+        result = service.analyze("короче нужно проверить бота", pre_metrics=pre_metrics)
 
         self.assertEqual(result["title"], "Проверка бота")
         self.assertEqual(result["summary"], "Нужно проверить бота.")
@@ -74,11 +80,12 @@ class AIPipelineTests(unittest.TestCase):
         prompt = client.system_prompt + "\n" + client.user_prompt
         self.assertIn("жёсткий сарказм", prompt)
         self.assertIn("бей по формату сообщения, а не по человеку", prompt)
-        self.assertNotIn("water_percent", prompt)
-        self.assertNotIn("wordiness_score", prompt)
-        self.assertNotIn("quality_score", prompt)
-        self.assertNotIn("voice_type_level", prompt)
-        self.assertNotIn("saved_seconds", prompt)
+        self.assertIn("voice_metrics", prompt)
+        self.assertIn('"duration_seconds": 18', prompt)
+        self.assertIn('"wordiness_score": 1.4', prompt)
+        self.assertIn("Метрики голосового сообщения рассчитаны локально", prompt)
+        self.assertIn("являются источником истины", prompt)
+        self.assertIn("не шути про длинное голосовое", prompt)
 
     def test_openai_service_has_no_text_analysis_method(self) -> None:
         self.assertFalse(hasattr(OpenAIService, "analyze"))
@@ -89,6 +96,13 @@ class AIPipelineTests(unittest.TestCase):
         with self.assertLogs("app.text_analysis_service", level="WARNING"):
             with self.assertRaises(TextAnalysisError):
                 service.analyze("текст")
+
+    def test_pre_metrics_are_calculated_before_deepseek(self) -> None:
+        metrics = calculate_pre_metrics(" ".join(["слово"] * 40), duration_seconds=18)
+
+        self.assertEqual(metrics["duration_seconds"], 18)
+        self.assertEqual(metrics["word_count"], 40)
+        self.assertLessEqual(metrics["wordiness_score"], 2.0)
 
     def test_voice_metrics_calculate_water_and_saved_seconds_locally(self) -> None:
         analysis = build_voice_analysis(

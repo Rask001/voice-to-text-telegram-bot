@@ -546,16 +546,16 @@
 
 ### `app/text_analysis_service.py`
 
-- Назначение: DeepSeek structured analysis для transcript.
+- Назначение: DeepSeek structured analysis для transcript и локального metrics context.
 - Основные классы:
   - `TextAnalysisService`;
   - `TextAnalysisError`;
   - `TextAnalysisResult`;
   - `VoiceAnalysisText`.
 - Основные функции:
-  - `TextAnalysisService.analyze()` — возвращает `title`, `summary`, `action_items`, `details`, `important_points`, `voice_analysis_text`;
-  - `_analysis_system_prompt()` — prompt для summary/tasks/details/meme;
-  - `_analysis_user_prompt()` — передает transcript;
+  - `TextAnalysisService.analyze()` — принимает transcript + optional `pre_metrics`, возвращает `title`, `summary`, `action_items`, `details`, `important_points`, `voice_analysis_text`;
+  - `_analysis_system_prompt()` — prompt для summary/tasks/details/meme и правило “локальные метрики — источник истины”;
+  - `_analysis_user_prompt()` — передает transcript и `voice_metrics`;
   - `_extract_json()`;
   - `_as_string_list()`.
 - Связи:
@@ -567,11 +567,15 @@
 
 - Назначение: локальный расчет метрик голосового без AI.
 - Основные функции:
-  - `build_voice_analysis()` — считает meaningful duration, water percent, wordiness, quality, saved seconds и объединяет это с DeepSeek `verdict/meme/quote`;
-  - `_estimate_meaningful_duration_seconds()`;
-  - `_calculate_water_percent()`;
-  - `_calculate_wordiness_score()`;
-  - `_calculate_quality_score()`.
+  - `count_words()`;
+  - `calculate_pre_metrics()` — считает `duration_seconds`, `word_count`, `words_per_minute`, rough `wordiness_score` перед DeepSeek;
+  - `calculate_final_metrics()` — считает `useful_word_count`, `compression_ratio`, `meaningful_duration_seconds`, `water_percent`, `wordiness_score`, `quality_score`, тип и класс воды после DeepSeek;
+  - `calculate_useful_word_count()` — использует `summary + tasks + important_points + details * 0.25`, без transcript;
+  - `get_water_class()`;
+  - `get_voice_type()`;
+  - `validate_voice_analysis_consistency()`;
+  - `sanitize_ai_meme_by_metrics()` — заменяет DeepSeek verdict/meme локальным fallback при конфликте с метриками;
+  - `build_voice_analysis()` — объединяет финальные локальные метрики с DeepSeek `verdict/meme/quote`.
 - Связи:
   - использует `normalize_voice_analysis()` из `app/voice_analysis.py`;
   - вызывается из `app/handlers/voice.py`;
@@ -744,6 +748,9 @@
   - `saved_seconds` не бывает меньше 0;
   - `total_saved_seconds` увеличивается;
   - `build_voice_analysis()` считает метрики локально;
+  - `calculate_pre_metrics()` ограничивает короткие сообщения;
+  - `calculate_final_metrics()` считает воду через compression ratio;
+  - `sanitize_ai_meme_by_metrics()` заменяет противоречивые verdict/meme;
   - formatter выводит анализ;
   - share-блок содержит meme;
   - rare title появляется только при высокой воде/многословности;
@@ -757,7 +764,8 @@
   - `AIPipelineTests`.
 - Основные проверки:
   - `TranscriptionService` возвращает только text;
-  - `TextAnalysisService` отправляет transcript в DeepSeek-compatible client и парсит JSON;
+  - `TextAnalysisService` отправляет transcript + pre_metrics в DeepSeek-compatible client и парсит JSON;
+  - DeepSeek prompt содержит правило “локальные метрики — источник истины”;
   - `OpenAIService` больше не имеет `analyze()`;
   - DeepSeek invalid JSON превращается в `TextAnalysisError`;
   - `voice_metrics_service` локально считает water и saved seconds;

@@ -130,6 +130,8 @@ def format_voice_analysis(
             "",
             f"⏱ Ты сэкономил: <b>{format_duration(voice_analysis['saved_seconds'])}</b>",
             f"🏆 Всего сэкономлено: <b>{format_duration(total_saved_seconds)}</b>",
+            "",
+            "@voitext_bot",
         ]
     )
     return "\n".join(parts)
