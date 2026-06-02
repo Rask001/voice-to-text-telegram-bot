@@ -73,6 +73,22 @@ class AccessServiceTests(unittest.TestCase):
         self.assertIn("Голосовое слишком длинное", denied_status.denial_reason or "")
         self.assertEqual(denied_status.denial_code, "voice_too_long")
 
+    def test_legacy_friend_tariff_alias_is_normalized_to_brother(self) -> None:
+        with self.session_factory() as session:
+            user_settings = get_or_create_user_settings(session, 103)
+            user_settings.tariff_type = "friend"
+            session.commit()
+
+            status = check_user_access(session, 103, None, self.settings, 60)
+            session.commit()
+
+        self.assertTrue(status.can_process)
+        self.assertEqual(status.tariff_type, BROTHER)
+
+        with self.session_factory() as session:
+            user_settings = get_or_create_user_settings(session, 103)
+            self.assertEqual(user_settings.tariff_type, BROTHER)
+
     def test_daily_voice_limit_denies_free_user(self) -> None:
         with self.session_factory() as session:
             user_settings = get_or_create_user_settings(session, 102)

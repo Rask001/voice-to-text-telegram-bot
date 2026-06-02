@@ -7,6 +7,7 @@ from app.admin_service import (
     add_friend_tariff,
     create_database_backup,
     get_start_text,
+    normalize_admin_tariff,
     remove_friend_tariff,
     reset_start_text,
     set_start_text,
@@ -58,6 +59,9 @@ class AdminServiceTests(unittest.TestCase):
             user = session.query(UserSettings).filter_by(telegram_user_id=123).one()
             self.assertEqual(user.tariff_type, PREMIUM)
             self.assertTrue(user.is_premium)
+
+    def test_unknown_admin_tariff_is_rejected(self) -> None:
+        self.assertIsNone(normalize_admin_tariff("banana"))
 
     def test_add_friend_sets_brother_tariff(self) -> None:
         with self.session_factory() as session:

@@ -7,6 +7,19 @@ FREE = "free"
 STANDARD = "standard"
 PREMIUM = "premium"
 
+TARIFF_ALIASES = {
+    OWNER: OWNER,
+    BROTHER: BROTHER,
+    "friend": BROTHER,
+    "bro": BROTHER,
+    "unlimited": BROTHER,
+    "по-братски": BROTHER,
+    "по-братски от тоши": BROTHER,
+    FREE: FREE,
+    STANDARD: STANDARD,
+    PREMIUM: PREMIUM,
+}
+
 
 @dataclass(frozen=True)
 class TariffPlan:
@@ -64,5 +77,9 @@ TARIFFS = {
 }
 
 
+def normalize_tariff_code(code: str | None, default: str | None = FREE) -> str | None:
+    return TARIFF_ALIASES.get((code or "").strip().lower(), default)
+
+
 def get_tariff(code: str) -> TariffPlan:
-    return TARIFFS.get(code, TARIFFS[FREE])
+    return TARIFFS.get(normalize_tariff_code(code), TARIFFS[FREE])

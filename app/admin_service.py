@@ -13,7 +13,7 @@ from app.db import _sync_database_url
 from app.models import AnalyticsEvent, AppConfig, Reminder, UserSettings, VoiceNote
 from app.preferences import get_or_create_user_settings
 from app import runtime_state
-from app.tariffs import BROTHER, FREE, OWNER, PREMIUM, STANDARD, get_tariff
+from app.tariffs import BROTHER, FREE, OWNER, PREMIUM, STANDARD, get_tariff, normalize_tariff_code
 
 
 ADMIN_ONLY_MESSAGE = "Команда доступна только владельцу бота."
@@ -38,13 +38,8 @@ DEFAULT_START_TEXT = (
 )
 
 TARIFF_ALIASES = {
-    FREE: FREE,
-    STANDARD: STANDARD,
-    PREMIUM: PREMIUM,
     "friend": BROTHER,
-    "brother": BROTHER,
     "bro": BROTHER,
-    OWNER: OWNER,
 }
 
 
@@ -100,7 +95,11 @@ def reset_start_text(session: Session) -> None:
 
 
 def normalize_admin_tariff(tariff: str) -> str | None:
-    return TARIFF_ALIASES.get(tariff.strip().lower())
+    raw = tariff.strip().lower()
+    if raw in TARIFF_ALIASES:
+        return TARIFF_ALIASES[raw]
+    normalized = normalize_tariff_code(raw, default=None)
+    return normalized if normalized in {FREE, STANDARD, PREMIUM, BROTHER, OWNER} else None
 
 
 def set_user_tariff(session: Session, telegram_id: int, tariff_type: str) -> UserSettings:

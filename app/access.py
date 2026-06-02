@@ -6,7 +6,16 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.preferences import get_or_create_user_settings
-from app.tariffs import BROTHER, FREE, OWNER, PREMIUM, STANDARD, TariffPlan, get_tariff
+from app.tariffs import (
+    BROTHER,
+    FREE,
+    OWNER,
+    PREMIUM,
+    STANDARD,
+    TariffPlan,
+    get_tariff,
+    normalize_tariff_code,
+)
 
 
 TRIAL_EXPIRED_MESSAGE = (
@@ -155,16 +164,17 @@ def _prepare_user_settings(session: Session, user_id: int, username: str | None,
 
 
 def _resolve_tariff_type(user_settings, user_id: int, username: str | None, settings: Settings) -> str:
+    stored_tariff = normalize_tariff_code(user_settings.tariff_type)
     if is_owner(user_id, username, settings):
         return OWNER
-    if user_settings.tariff_type == OWNER:
+    if stored_tariff == OWNER:
         return OWNER
     if user_id in settings.unlimited_user_ids or bool(user_settings.is_unlimited):
         return BROTHER
     if bool(user_settings.is_premium):
         return PREMIUM
-    if user_settings.tariff_type in {STANDARD, PREMIUM, BROTHER}:
-        return user_settings.tariff_type
+    if stored_tariff in {STANDARD, PREMIUM, BROTHER}:
+        return stored_tariff
     return FREE
 
 
