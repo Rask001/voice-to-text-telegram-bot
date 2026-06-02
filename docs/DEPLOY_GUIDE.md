@@ -56,6 +56,36 @@ ssh -i ~/.ssh/codex_remote_mac niki4ka@192.168.1.104
 
 Когда мы добавили новую функцию или исправили баг, нужно сделать 3 шага.
 
+### Самый простой способ
+
+Если рабочий Mac и серверный Mac находятся в одной локальной сети:
+
+```bash
+cd /Users/tosha/Documents/Codex/2026-05-29/telegram-python-mvp-python-3-12
+./deploy_lan.sh
+```
+
+Если нужно обновить сервер через Tailscale:
+
+```bash
+cd /Users/tosha/Documents/Codex/2026-05-29/telegram-python-mvp-python-3-12
+./deploy_tailscale.sh
+```
+
+Оба скрипта:
+
+```text
+1. показывают локальный git status;
+2. спрашивают название коммита;
+3. запускают compileall и unittest;
+4. делают git add, commit и push;
+5. заходят на сервер по SSH;
+6. запускают там ./deploy.sh;
+7. показывают ./status.sh.
+```
+
+`deploy_tailscale.sh` дополнительно проверяет SSH через Tailscale. Если Hupp снова перехватил маршрут, скрипт запускает `fix_tailscale_route.sh`. Hupp при этом не отключается и не перезапускается.
+
 ### Шаг 1. Проверить проект локально
 
 Открой Terminal на своём Mac и перейди в проект:
@@ -152,6 +182,32 @@ Bot process found:
 
 ```bash
 ssh -i ~/.ssh/codex_remote_mac niki4ka@192.168.1.104 'cd ~/Projects/voice-to-text-telegram-bot && ./status.sh'
+```
+
+## Если Tailscale SSH снова не пускает
+
+Hupp отключать нельзя. Если SSH по Tailscale IP `100.104.17.90` снова зависает, значит Hupp мог перехватить host-route до сервисного Mac.
+
+На рабочем Mac запусти:
+
+```bash
+./fix_tailscale_route.sh
+```
+
+Скрипт:
+
+```text
+1. находит локальный Tailscale IP;
+2. находит текущий Tailscale-интерфейс, например utun7;
+3. удаляет только route до 100.104.17.90;
+4. добавляет route до 100.104.17.90 через Tailscale;
+5. не выключает и не перезапускает Hupp.
+```
+
+После этого проверь:
+
+```bash
+ssh -i ~/.ssh/codex_remote_mac niki4ka@100.104.17.90
 ```
 
 Статус показывает:
@@ -322,6 +378,22 @@ git pull origin main
 ## 13. Мини-шпаргалка
 
 Полный стандартный цикл:
+
+```bash
+cd /Users/tosha/Documents/Codex/2026-05-29/telegram-python-mvp-python-3-12
+
+./deploy_lan.sh
+```
+
+Через Tailscale:
+
+```bash
+cd /Users/tosha/Documents/Codex/2026-05-29/telegram-python-mvp-python-3-12
+
+./deploy_tailscale.sh
+```
+
+Ручной вариант, если хочется пройти все шаги самому:
 
 ```bash
 cd /Users/tosha/Documents/Codex/2026-05-29/telegram-python-mvp-python-3-12

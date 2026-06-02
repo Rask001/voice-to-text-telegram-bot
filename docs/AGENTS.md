@@ -22,6 +22,10 @@
 - `start_local.sh`
 - `stop_local.sh`
 - `status_local.sh`
+- `deploy_common.sh`
+- `deploy_lan.sh`
+- `deploy_tailscale.sh`
+- `fix_tailscale_route.sh`
 - `Dockerfile`
 - `docker-compose.yml`
 
@@ -31,6 +35,15 @@
 - `./start_local.sh`
 - `./status_local.sh`
 - `./status.sh`
+- `./deploy_lan.sh`
+- `./deploy_tailscale.sh`
+
+Важно:
+
+- `deploy_lan.sh` обновляет сервер через `192.168.1.104`;
+- `deploy_tailscale.sh` обновляет сервер через `100.104.17.90`;
+- `deploy_tailscale.sh` может вызвать `fix_tailscale_route.sh`, но Hupp/VPN отключать нельзя;
+- серверный бот управляется через удаленный `deploy.sh`, `restart.sh`, `status.sh` и `launchd`, не через ручной `python -m app.main`.
 
 ### Если нужно изменить `.env` или настройки
 
