@@ -14,6 +14,7 @@ from app.handlers.keyboards import (
     main_keyboard,
     reminder_fallback_time_keyboard,
     reminder_time_keyboard,
+    reminder_tomorrow_clarification_keyboard,
     reminders_keyboard,
 )
 from app.models import Reminder
@@ -21,7 +22,6 @@ from app.reminder_parser import (
     now_in_timezone,
     parse_reminder_text,
     parse_reminder_time_choice,
-    parse_reminder_time_text,
 )
 from app.reminder_service import (
     cancel_reminder,
@@ -41,6 +41,7 @@ class ReminderCreation(StatesGroup):
     waiting_for_time = State()
     waiting_for_manual_time = State()
     waiting_for_task_after_time = State()
+    waiting_for_tomorrow_clarification = State()
 
 
 @router.message(Command("reminders"))
@@ -72,6 +73,9 @@ async def remind_command(
             timezone=settings.default_timezone,
             default_time=settings.default_reminder_time,
         )
+        if parsed.needs_tomorrow_clarification:
+            await _ask_tomorrow_clarification(message, state, parsed)
+            return
         if parsed.success and parsed.remind_at is not None:
             await state.clear()
             await _create_reminder_and_answer(
@@ -127,6 +131,9 @@ async def reminder_text_received(
         timezone=settings.default_timezone,
         default_time=settings.default_reminder_time,
     )
+    if parsed.needs_tomorrow_clarification:
+        await _ask_tomorrow_clarification(message, state, parsed)
+        return
     if parsed.success and parsed.remind_at is not None and message.from_user is not None:
         await state.clear()
         await _create_reminder_and_answer(
@@ -184,6 +191,58 @@ async def reminder_task_after_time_received(
         session_factory,
         source="task_after_time",
     )
+
+
+@router.callback_query(
+    ReminderCreation.waiting_for_tomorrow_clarification,
+    F.data.startswith("reminder_tomorrow_"),
+)
+async def reminder_tomorrow_clarification_selected(
+    callback: CallbackQuery,
+    state: FSMContext,
+    settings: Settings,
+    session_factory: sessionmaker[Session],
+) -> None:
+    if callback.from_user is None or callback.data is None:
+        return
+    action = callback.data.removeprefix("reminder_tomorrow_").removesuffix(":")
+    if action == "cancel":
+        await state.clear()
+        await callback.answer("Отменено")
+        if isinstance(callback.message, Message):
+            await callback.message.answer("Создание напоминания отменено.", reply_markup=main_keyboard())
+        return
+
+    data = await state.get_data()
+    task_text = str(data.get("task_text") or "").strip()
+    today_at = str(data.get("tomorrow_today_at") or "")
+    nextday_at = str(data.get("tomorrow_nextday_at") or "")
+    if not task_text or not today_at or not nextday_at:
+        await state.clear()
+        await callback.answer("Данные потерялись. Попробуйте ещё раз.", show_alert=True)
+        return
+
+    if action == "today":
+        remind_at = datetime.fromisoformat(today_at)
+    elif action == "nextday":
+        remind_at = datetime.fromisoformat(nextday_at)
+    else:
+        await callback.answer("Неизвестный выбор", show_alert=True)
+        return
+
+    await state.clear()
+    await callback.answer("Напоминание создано")
+    if callback.message is not None and hasattr(callback.message, "answer"):
+        await _create_reminder_and_answer(
+            callback.message,
+            callback.from_user,
+            callback.from_user.id,
+            task_text,
+            remind_at,
+            settings,
+            session_factory,
+            source=f"tomorrow_clarification_{action}",
+        )
 
 
 @router.callback_query(ReminderCreation.waiting_for_manual_time, F.data.startswith("remind_time:"))
@@ -257,18 +316,6 @@ async def reminder_manual_time_received(
         await message.answer("Создание напоминания отменено.", reply_markup=main_keyboard())
         return
 
-    remind_at = parse_reminder_time_text(
-        text,
-        timezone=settings.default_timezone,
-        default_time=settings.default_reminder_time,
-    )
-    if remind_at is None:
-        await message.answer(
-            _time_parse_error_text(),
-            reply_markup=reminder_fallback_time_keyboard(),
-        )
-        return
-
     data = await state.get_data()
     task_text = str(data.get("task_text") or "").strip()
     if not task_text:
@@ -276,13 +323,28 @@ async def reminder_manual_time_received(
         await message.answer("Текст напоминания потерялся. Попробуйте ещё раз.", reply_markup=main_keyboard())
         return
 
+    parsed = parse_reminder_text(
+        f"{task_text} {text}",
+        timezone=settings.default_timezone,
+        default_time=settings.default_reminder_time,
+    )
+    if parsed.needs_tomorrow_clarification:
+        await _ask_tomorrow_clarification(message, state, parsed)
+        return
+    if parsed.remind_at is None:
+        await message.answer(
+            _time_parse_error_text(),
+            reply_markup=reminder_fallback_time_keyboard(),
+        )
+        return
+
     await state.clear()
     await _create_reminder_and_answer(
         message,
         message.from_user,
         message.from_user.id,
-        task_text,
-        remind_at,
+        parsed.task_text or task_text,
+        parsed.remind_at,
         settings,
         session_factory,
         source="manual_text",
@@ -402,6 +464,28 @@ async def _create_reminder_and_answer(
         settings=settings,
     )
     await message.answer(created_text, reply_markup=main_keyboard())
+
+
+async def _ask_tomorrow_clarification(message: Message, state: FSMContext, parsed) -> None:
+    if parsed.clarification_today_at is None or parsed.clarification_nextday_at is None:
+        await message.answer("Когда напомнить?", reply_markup=reminder_time_keyboard())
+        return
+
+    await state.update_data(
+        task_text=parsed.task_text,
+        tomorrow_today_at=parsed.clarification_today_at.isoformat(),
+        tomorrow_nextday_at=parsed.clarification_nextday_at.isoformat(),
+        timezone=parsed.timezone,
+    )
+    await state.set_state(ReminderCreation.waiting_for_tomorrow_clarification)
+    await message.answer(
+        "❓ <b>Уточни дату</b>\n\n"
+        "Сейчас уже после полуночи 😴\n\n"
+        "Что ты имеешь в виду?\n\n"
+        f"1️⃣ Сегодня ({parsed.clarification_today_at.strftime('%H:%M')} через несколько часов)\n\n"
+        f"2️⃣ Завтра ({parsed.clarification_nextday_at.strftime('%H:%M')} через день)",
+        reply_markup=reminder_tomorrow_clarification_keyboard(),
+    )
 
 
 def _time_parse_error_text() -> str:

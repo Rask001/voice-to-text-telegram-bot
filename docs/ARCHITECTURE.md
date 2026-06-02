@@ -71,7 +71,9 @@ Voice Message
 ↓
 handle_voice()
 ↓
-status: "Голосовое получил. Проверяю лимиты..."
+get_random_progress_pack()
+↓
+status: progress_pack[0]
 ↓
 check_user_access(duration_seconds)
 ↓
@@ -83,11 +85,15 @@ OpenAI transcription
 ↓
 OpenAI analysis JSON
 ↓
+normalize voice_analysis
+↓
 record_voice_usage()
 ↓
 save VoiceNote to SQLite
 ↓
 send compact/default response
+↓
+send voice analysis block
 ↓
 attach fresh_* inline buttons
 ```
@@ -95,10 +101,13 @@ attach fresh_* inline buttons
 Подробности:
 
 - лимиты проверяются до скачивания аудио, ffmpeg и OpenAI;
+- тексты прогресса выбираются один раз на voice из `app/progress_messages.py`; отдельный progress updater редактирует одно статусное сообщение каждые 1.7 секунды, на успехе бот дожидается завершения набора, а при ошибке останавливает updater и показывает ошибку;
 - аудиофайлы сохраняются только во временных файлах и удаляются в `finally`;
 - `OpenAIService.transcribe()` возвращает полный текст;
-- `OpenAIService.analyze()` возвращает `title`, `summary`, `tasks`, `details`, `important_points`;
+- `OpenAIService.analyze()` возвращает `title`, `summary`, `tasks`, `details`, `important_points`, `voice_analysis`;
 - задачи сохраняются в `VoiceNote.action_items` как JSON-массив `{text, priority}`;
+- мемный анализ сохраняется в `VoiceNote.voice_analysis_json`;
+- `saved_seconds` прибавляется к `UserSettings.total_saved_seconds` и показывается в `/profile`;
 - старые newline-задачи читаются как `priority=false`;
 - ответ по умолчанию строит `format_short()`: summary + tasks.
 
@@ -117,8 +126,16 @@ JSON extraction
 ↓
 normalize_tasks()
 ↓
+normalize_voice_analysis()
+↓
 handlers save normalized data
 ```
+
+`voice_analysis` создается в том же OpenAI-запросе, что summary/tasks/details. Отдельного запроса к OpenAI нет. Структура включает длительность, содержательную часть, индекс воды, многословность, оценку, уровни воды/типа/вердикта, цитату, вердикт, мем, редкий титул и `saved_seconds`.
+
+`normalize_voice_analysis()` не доверяет всем уровням OpenAI напрямую: `water_level` пересчитывается из `water_percent`, а `voice_type_level` — из `wordiness_score` с мягким учетом воды и длительности. Это убирает противоречия вроде низкой многословности с типом `Подкастер`.
+
+Prompt требует жёсткий сарказм, циничный короткий мемный verdict/meme без канцелярита и без мягкой “бережной” подачи. Мем шутит про формат, длину, воду, драматургию, фразы вроде `короче`/`я быстро` или контекст, но бьёт по формату сообщения, а не по человеку. Запрещены мат, травля, угрозы, личностные оскорбления и чувствительные признаки.
 
 OpenAI ошибки:
 
@@ -200,6 +217,7 @@ fresh_full_text:<id>
 fresh_tasks:<id>
 fresh_details:<id>
 fresh_share:<id>
+fresh_analysis:<id>
 ↓
 fresh_note_callback()
 ↓
@@ -233,6 +251,7 @@ history_full_text:<id>
 history_tasks:<id>
 history_details:<id>
 history_share:<id>
+history_analysis:<id>
 ↓
 history_note_callback()
 ↓
@@ -328,7 +347,23 @@ reminder_service.create_reminder()
 SQLite reminders(status=pending)
 ```
 
-`reminder_parser.py` не использует OpenAI. Основная точка входа — `parse_reminder_text()`, которая возвращает `success`, `task_text`, `remind_at`, `timezone`, `matched_pattern`, `error`, `needs_task`. Parser понимает разговорные русские форматы: `через минуту`, `через 10`, `через пол часа`, `через полчаса`, `минут через 15`, `через пару минут`, `через несколько часов`, `через 1 час 30 минут`, `через полтора часа`, `сегодня 18:00`, `завтра 14:30`, `завтра утром/днём/вечером/ночью`, дни недели и формат `задача в HH:MM`, например `позвонить Соне в 21:21`. Для ввода только времени: если время уже прошло сегодня, ставится завтра. `через 10` без единиц считается 10 минутами. `DEFAULT_TIMEZONE` задает часовой пояс, `DEFAULT_REMINDER_TIME` — дефолтное время для коротких сценариев вроде `завтра` или `в пятницу`.
+`reminder_parser.py` не использует OpenAI. Основная точка входа — `parse_reminder_text()`, которая возвращает `success`, `task_text`, `remind_at`, `timezone`, `matched_pattern`, `error`, `needs_task`, `needs_tomorrow_clarification`, `clarification_today_at`, `clarification_nextday_at`. Parser понимает разговорные русские форматы: `через минуту`, `через 10`, `через пол часа`, `через полчаса`, `минут через 15`, `через пару минут`, `через несколько часов`, `через 1 час 30 минут`, `через полтора часа`, `сегодня 18:00`, `завтра 14:30`, `завтра утром/днём/вечером/ночью`, `послезавтра`, `через день`, `через два дня`, дни недели и формат `задача в HH:MM`, например `позвонить Соне в 21:21`. Для ввода только времени: если время уже прошло сегодня, ставится завтра. `через 10` без единиц считается 10 минутами. `DEFAULT_TIMEZONE` задает часовой пояс, `DEFAULT_REMINDER_TIME` — дефолтное время для коротких сценариев вроде `завтра` или `в пятницу`.
+
+Ночной режим для неоднозначного `завтра`:
+
+```text
+00:00-05:59 + "завтра в 11:00" без явной даты
+↓
+parse_reminder_text(needs_tomorrow_clarification=True)
+↓
+FSM stores task_text + today/nextday candidates
+↓
+reminder_tomorrow_today: or reminder_tomorrow_nextday:
+↓
+reminder_service.create_reminder()
+```
+
+Порог хранится в `app/reminder_parser.py:AMBIGUOUS_TOMORROW_HOUR`. Уточнение не показывается для явных дат (`03.06`, `3 июня`, `2026-06-03`), `послезавтра`, `через день`, дней недели и времени после 06:00.
 
 Scheduler тоже берет текущее время через `DEFAULT_TIMEZONE`, а не через системную таймзону сервера. Это сохраняет одинаковое сравнение `remind_at <= now` на локальном и серверном Mac.
 

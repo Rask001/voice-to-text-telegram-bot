@@ -70,7 +70,11 @@ def note_keyboard(note_id: int, source: str) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(
                     text="📤 Поделиться",
                     callback_data=f"{source}_share:{note_id}",
-                )
+                ),
+                InlineKeyboardButton(
+                    text="📊 Анализ",
+                    callback_data=f"{source}_analysis:{note_id}",
+                ),
             ],
         ]
     )
@@ -118,6 +122,29 @@ def reminder_fallback_time_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="Завтра 09:00", callback_data="remind_time:tomorrow_09")],
             [InlineKeyboardButton(text="Завтра 18:00", callback_data="remind_time:tomorrow_18")],
             [InlineKeyboardButton(text="Отмена", callback_data="remind_time:cancel")],
+        ]
+    )
+
+
+def reminder_tomorrow_clarification_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="📅 Сегодня",
+                    callback_data="reminder_tomorrow_today:",
+                ),
+                InlineKeyboardButton(
+                    text="📅 Через день",
+                    callback_data="reminder_tomorrow_nextday:",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="❌ Отмена",
+                    callback_data="reminder_tomorrow_cancel:",
+                )
+            ],
         ]
     )
 

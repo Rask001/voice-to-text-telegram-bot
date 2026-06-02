@@ -27,9 +27,13 @@
 - `tasks_message_ids TEXT DEFAULT ''`
 - `title VARCHAR(120) DEFAULT ''`
 - `share_message_ids TEXT DEFAULT ''`
+- `analysis_message_ids TEXT DEFAULT ''`
+- `voice_analysis_json TEXT DEFAULT ''`
 - `result_message_id INTEGER`
 
 Примечание: `action_items` для новых записей хранит JSON-массив задач `{text, priority}`. Старые записи могут хранить строки через переносы.
+
+Примечание: `voice_analysis_json` хранит JSON с мемным анализом голосового: `duration_seconds`, `meaningful_duration_seconds`, `water_percent`, `wordiness_score`, `quality_score`, `voice_type_level`, `water_level`, `verdict_level`, `verdict`, `memorable_quote`, `meme`, `rare_title`, `saved_seconds`.
 
 ### `user_settings`
 
@@ -51,6 +55,7 @@
 - `minutes_limit_month INTEGER DEFAULT 15`
 - `voices_used_today INTEGER DEFAULT 0`
 - `daily_voice_limit INTEGER DEFAULT 3`
+- `total_saved_seconds INTEGER DEFAULT 0`
 - `usage_date DATE`
 - `minutes_month_key VARCHAR(7) DEFAULT ''`
 
@@ -138,6 +143,8 @@ Legacy таблица старого дневного счетчика.
 - `ADD COLUMN details_message_ids TEXT DEFAULT ''`
 - `ADD COLUMN tasks_message_ids TEXT DEFAULT ''`
 - `ADD COLUMN share_message_ids TEXT DEFAULT ''`
+- `ADD COLUMN analysis_message_ids TEXT DEFAULT ''`
+- `ADD COLUMN voice_analysis_json TEXT DEFAULT ''`
 - `ADD COLUMN result_message_id INTEGER`
 
 Для `user_settings`:
@@ -153,6 +160,7 @@ Legacy таблица старого дневного счетчика.
 - `ADD COLUMN minutes_limit_month INTEGER DEFAULT 15`
 - `ADD COLUMN voices_used_today INTEGER DEFAULT 0`
 - `ADD COLUMN daily_voice_limit INTEGER DEFAULT 3`
+- `ADD COLUMN total_saved_seconds INTEGER DEFAULT 0`
 - `ADD COLUMN usage_date DATE`
 - `ADD COLUMN minutes_month_key VARCHAR(7) DEFAULT ''`
 

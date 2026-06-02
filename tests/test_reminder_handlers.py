@@ -1,6 +1,7 @@
 import asyncio
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,7 +12,11 @@ from aiogram.types import InlineKeyboardMarkup
 
 from app.config import Settings
 from app.db import create_session_factory
-from app.handlers.reminders import ReminderCreation, reminder_text_received
+from app.handlers.reminders import (
+    ReminderCreation,
+    reminder_text_received,
+    reminder_tomorrow_clarification_selected,
+)
 from app.models import Reminder
 
 
@@ -23,6 +28,17 @@ class FakeMessage:
 
     async def answer(self, text: str, reply_markup=None):
         self.answers.append({"text": text, "reply_markup": reply_markup})
+
+
+class FakeCallback:
+    def __init__(self, data: str, message: FakeMessage) -> None:
+        self.data = data
+        self.from_user = SimpleNamespace(id=123, username="tester")
+        self.message = message
+        self.answers = []
+
+    async def answer(self, text: str, show_alert: bool = False):
+        self.answers.append({"text": text, "show_alert": show_alert})
 
 
 class ReminderHandlerTests(unittest.TestCase):
@@ -129,6 +145,59 @@ class ReminderHandlerTests(unittest.TestCase):
 
         with self.session_factory() as session:
             self.assertEqual(session.query(Reminder).count(), 0)
+
+    def test_tomorrow_clarification_today_creates_today_date(self) -> None:
+        message = FakeMessage("")
+        callback = FakeCallback("reminder_tomorrow_today:", message)
+
+        async def run_case() -> None:
+            await self.state.set_state(ReminderCreation.waiting_for_tomorrow_clarification)
+            await self.state.update_data(
+                task_text="разбуди меня",
+                tomorrow_today_at=datetime(2026, 6, 2, 11, 0).isoformat(),
+                tomorrow_nextday_at=datetime(2026, 6, 3, 11, 0).isoformat(),
+                timezone="Russia/Moscow",
+            )
+            await reminder_tomorrow_clarification_selected(
+                callback,
+                self.state,
+                self.settings,
+                self.session_factory,
+            )
+
+        asyncio.run(run_case())
+
+        self.assertEqual(callback.answers[0]["text"], "Напоминание создано")
+        with self.session_factory() as session:
+            reminder = session.query(Reminder).one()
+            self.assertEqual(reminder.task_text, "разбуди меня")
+            self.assertEqual(reminder.remind_at, datetime(2026, 6, 2, 11, 0))
+
+    def test_tomorrow_clarification_nextday_creates_nextday_date(self) -> None:
+        message = FakeMessage("")
+        callback = FakeCallback("reminder_tomorrow_nextday:", message)
+
+        async def run_case() -> None:
+            await self.state.set_state(ReminderCreation.waiting_for_tomorrow_clarification)
+            await self.state.update_data(
+                task_text="разбуди меня",
+                tomorrow_today_at=datetime(2026, 6, 2, 11, 0).isoformat(),
+                tomorrow_nextday_at=datetime(2026, 6, 3, 11, 0).isoformat(),
+                timezone="Russia/Moscow",
+            )
+            await reminder_tomorrow_clarification_selected(
+                callback,
+                self.state,
+                self.settings,
+                self.session_factory,
+            )
+
+        asyncio.run(run_case())
+
+        self.assertEqual(callback.answers[0]["text"], "Напоминание создано")
+        with self.session_factory() as session:
+            reminder = session.query(Reminder).one()
+            self.assertEqual(reminder.remind_at, datetime(2026, 6, 3, 11, 0))
 
 
 if __name__ == "__main__":

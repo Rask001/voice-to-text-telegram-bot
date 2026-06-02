@@ -48,6 +48,8 @@ class VoiceNote(Base):
     details_message_ids: Mapped[str] = mapped_column(Text, default="")
     tasks_message_ids: Mapped[str] = mapped_column(Text, default="")
     share_message_ids: Mapped[str] = mapped_column(Text, default="")
+    analysis_message_ids: Mapped[str] = mapped_column(Text, default="")
+    voice_analysis_json: Mapped[str] = mapped_column(Text, default="")
     result_message_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -108,5 +110,6 @@ class UserSettings(Base):
     minutes_limit_month: Mapped[int] = mapped_column(Integer, default=15)
     voices_used_today: Mapped[int] = mapped_column(Integer, default=0)
     daily_voice_limit: Mapped[int] = mapped_column(Integer, default=3)
+    total_saved_seconds: Mapped[int] = mapped_column(Integer, default=0)
     usage_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     minutes_month_key: Mapped[str] = mapped_column(String(7), default="")

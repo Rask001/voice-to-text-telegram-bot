@@ -5,6 +5,13 @@ from app.access import AccessStatus
 from app.models import Reminder
 from app.preferences import normalize_response_mode
 from app.tasks import TaskItem, normalize_tasks, parse_stored_tasks, sort_tasks_for_display
+from app.voice_analysis import (
+    VoiceAnalysis,
+    format_compact_duration,
+    format_duration,
+    voice_type,
+    water_class,
+)
 
 
 TELEGRAM_TEXT_LIMIT = 3900
@@ -59,7 +66,11 @@ def format_tasks(action_items: list[TaskItem]) -> str:
     return "✅ <b>Задачи:</b>\n" + format_numbered_list(action_items)
 
 
-def format_share(summary: str, action_items: list[TaskItem]) -> str:
+def format_share(
+    summary: str,
+    action_items: list[TaskItem],
+    voice_analysis: VoiceAnalysis | None = None,
+) -> str:
     parts = [
         "📝 <b>Расшифровка голосового</b>",
         "",
@@ -67,10 +78,77 @@ def format_share(summary: str, action_items: list[TaskItem]) -> str:
         escape(trim_plain(summary, limit=700)) or "Нет краткого содержания.",
         "",
         format_tasks(action_items),
-        "",
-        "🎙Создано через: @voitext_bot",
     ]
+    if voice_analysis is not None:
+        parts.extend(["", format_share_voice_analysis(voice_analysis)])
+    parts.extend(
+        [
+            "",
+            "🎙Создано через: @voitext_bot",
+        ]
+    )
     return "\n".join(parts)
+
+
+def format_voice_analysis(
+    voice_analysis: VoiceAnalysis,
+    total_saved_seconds: int,
+) -> str:
+    water_emoji, water_text = water_class(voice_analysis["water_level"])
+    parts = [
+        "📊 <b>Анализ голосового</b>",
+        "",
+        f"🎙 Длительность: <b>{format_duration(voice_analysis['duration_seconds'])}</b>",
+        f"🧠 Содержательная часть: <b>{format_duration(voice_analysis['meaningful_duration_seconds'])}</b>",
+        "",
+        f"💧 Индекс воды: <b>{voice_analysis['water_percent']}%</b>",
+        f"{water_emoji} Класс воды: <b>{escape(water_text)}</b>",
+        "",
+        f"🗣 Многословность: <b>{voice_analysis['wordiness_score']:.1f} / 10</b>",
+        f"🎭 Тип: <b>{escape(voice_type(voice_analysis['voice_type_level']))}</b>",
+        "",
+        f"⭐ Оценка: <b>{voice_analysis['quality_score']:.1f} / 10</b>",
+    ]
+    if voice_analysis["rare_title"]:
+        parts.extend(["", f"🏆 Титул: <b>{escape(voice_analysis['rare_title'])}</b>"])
+    if voice_analysis["memorable_quote"]:
+        parts.extend(
+            [
+                "",
+                "🎤 <b>Цитата выпуска:</b>",
+                f"“{escape(voice_analysis['memorable_quote'])}”",
+            ]
+        )
+    parts.extend(
+        [
+            "",
+            "🤖 <b>Вердикт:</b>",
+            escape(voice_analysis["verdict"]),
+            "",
+            "😂",
+            escape(voice_analysis["meme"]),
+            "",
+            f"⏱ Ты сэкономил: <b>{format_duration(voice_analysis['saved_seconds'])}</b>",
+            f"🏆 Всего сэкономлено: <b>{format_duration(total_saved_seconds)}</b>",
+        ]
+    )
+    return "\n".join(parts)
+
+
+def format_share_voice_analysis(voice_analysis: VoiceAnalysis) -> str:
+    return "\n".join(
+        [
+            f"🎙 Голосовое: <b>{format_compact_duration(voice_analysis['duration_seconds'])}</b>",
+            f"🧠 Суть: <b>{format_compact_duration(voice_analysis['meaningful_duration_seconds'])}</b>",
+            f"💧 Воды: <b>{voice_analysis['water_percent']}%</b>",
+            f"🎭 Тип: <b>{escape(voice_type(voice_analysis['voice_type_level']))}</b>",
+            "",
+            "😂",
+            escape(voice_analysis["meme"]),
+            "",
+            f"⏱ Сэкономлено: <b>{format_compact_duration(voice_analysis['saved_seconds'])}</b>",
+        ]
+    )
 
 
 def format_history(notes) -> str:
@@ -152,6 +230,7 @@ def format_profile(
         f"Минуты всего:\n"
         f"<b>{access_status.minutes_used_total} / {total_limit}</b>\n\n"
         f"Осталось минут всего:\n<b>{total_remaining}</b>\n\n"
+        f"⏱ Сэкономлено времени:\n<b>{format_duration(access_status.total_saved_seconds)}</b>\n\n"
         f"Осталось дней пробного периода:\n<b>{trial_days}</b>\n\n"
         f"Сброс лимита:\n<b>{reset_text}</b>"
     )

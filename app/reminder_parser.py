@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 DEFAULT_REMINDER_TIMEZONE = "Russia/Moscow"
 DEFAULT_REMINDER_TIME = "10:00"
+AMBIGUOUS_TOMORROW_HOUR = 6
 _ZONEINFO_FALLBACK_TIMEZONE = "Europe/Moscow"
 
 REMINDER_TIME_CHOICES = {
@@ -98,8 +99,46 @@ _WEEKDAY_RE = re.compile(
     rf"(?:\s+(?:в\s+)?{_TIME_RE}|\s+(?P<part>утром|днем|днём|вечером|ночью))?",
     re.IGNORECASE,
 )
+_MONTHS = {
+    "января": 1,
+    "февраля": 2,
+    "марта": 3,
+    "апреля": 4,
+    "мая": 5,
+    "июня": 6,
+    "июля": 7,
+    "августа": 8,
+    "сентября": 9,
+    "октября": 10,
+    "ноября": 11,
+    "декабря": 12,
+}
 _DAY_RE = re.compile(
-    rf"\b(?P<day>сегодня|завтра)(?:\s+(?:в\s+)?{_TIME_RE}|\s+(?P<part>утром|днем|днём|вечером|ночью))?\b",
+    rf"\b(?P<day>сегодня|завтра|завтрашн(?:ий|им|ее|его|ему|яя|юю))"
+    rf"(?:\s+(?:в\s+)?{_TIME_RE}|\s+(?P<part>утром|днем|днём|вечером|ночью))?\b",
+    re.IGNORECASE,
+)
+_DAY_OFFSET_RE = re.compile(
+    rf"\b(?P<phrase>послезавтра|через\s+день|через\s+(?:два|2)\s+дн(?:я|ей)?)"
+    rf"(?:\s+(?:в\s+)?{_TIME_RE}|\s+(?P<part>утром|днем|днём|вечером|ночью))?\b",
+    re.IGNORECASE,
+)
+_DATE_NUMERIC_RE = re.compile(
+    r"\b(?P<day>\d{1,2})[.\-/](?P<month>\d{1,2})(?:[.\-/](?P<year>\d{2,4}))?"
+    r"(?:\s+(?:в\s+)?(?P<hour>[01]?\d|2[0-3])(?::(?P<minute>[0-5]\d))?)?\b",
+    re.IGNORECASE,
+)
+_DATE_ISO_RE = re.compile(
+    r"\b(?P<year>\d{4})-(?P<month>\d{1,2})-(?P<day>\d{1,2})"
+    r"(?:\s+(?:в\s+)?(?P<hour>[01]?\d|2[0-3])(?::(?P<minute>[0-5]\d))?)?\b",
+    re.IGNORECASE,
+)
+_DATE_MONTH_RE = re.compile(
+    r"\b(?P<day>\d{1,2})\s+"
+    r"(?P<month>января|февраля|марта|апреля|мая|июня|июля|августа|"
+    r"сентября|октября|ноября|декабря)"
+    r"(?:\s+(?P<year>\d{4}))?"
+    r"(?:\s+(?:в\s+)?(?P<hour>[01]?\d|2[0-3])(?::(?P<minute>[0-5]\d))?)?\b",
     re.IGNORECASE,
 )
 _TIME_ONLY_PATTERNS = (
@@ -124,6 +163,9 @@ class ReminderTextParseResult:
     matched_pattern: str | None
     error: str | None
     needs_task: bool = False
+    needs_tomorrow_clarification: bool = False
+    clarification_today_at: datetime | None = None
+    clarification_nextday_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -150,6 +192,29 @@ def parse_reminder_text(
         return _result(False, _clean_task_text(raw), None, timezone, None, "time_not_found")
 
     task_text = _clean_task_text(raw[: candidate.start] + " " + raw[candidate.end :])
+    if _needs_tomorrow_clarification(raw, candidate, current):
+        if not task_text:
+            return _result(
+                False,
+                "",
+                candidate.remind_at,
+                timezone,
+                candidate.matched_pattern,
+                "missing_task",
+                needs_task=True,
+            )
+        today_at = datetime.combine(current.date(), candidate.remind_at.time())
+        return _result(
+            False,
+            task_text,
+            candidate.remind_at,
+            timezone,
+            candidate.matched_pattern,
+            "ambiguous_tomorrow",
+            needs_tomorrow_clarification=True,
+            clarification_today_at=today_at,
+            clarification_nextday_at=candidate.remind_at,
+        )
     if not task_text:
         return _result(
             False,
@@ -250,6 +315,8 @@ def _find_time_candidate(
 ) -> _TimeCandidate | None:
     candidates = []
     candidates.extend(_relative_candidates(raw, current))
+    candidates.extend(_date_candidates(raw, current, default_time))
+    candidates.extend(_day_offset_candidates(raw, current, default_time))
     candidates.extend(_day_candidates(raw, current, default_time))
     candidates.extend(_weekday_candidates(raw, current, default_time))
     candidates.extend(_time_only_candidates(raw, current))
@@ -279,13 +346,90 @@ def _day_candidates(raw: str, current: datetime, default_time: str) -> list[_Tim
     candidates = []
     for matched in _DAY_RE.finditer(raw):
         day = matched.group("day").lower()
-        target_date = current.date() + (timedelta(days=1) if day == "завтра" else timedelta())
+        is_tomorrow = day == "завтра" or day.startswith("завтрашн")
+        target_date = current.date() + (timedelta(days=1) if is_tomorrow else timedelta())
         target_time = _extract_time_or_part(matched, parse_default_time(default_time))
         remind_at = datetime.combine(target_date, target_time)
         candidates.append(
-            _TimeCandidate(matched.start(), matched.end(), remind_at, f"{day}_time")
+            _TimeCandidate(
+                matched.start(),
+                matched.end(),
+                remind_at,
+                "tomorrow_time" if is_tomorrow else "today_time",
+            )
         )
     return candidates
+
+
+def _day_offset_candidates(raw: str, current: datetime, default_time: str) -> list[_TimeCandidate]:
+    candidates = []
+    for matched in _DAY_OFFSET_RE.finditer(raw):
+        phrase = _normalize(matched.group("phrase"))
+        days = 1 if phrase == "через день" else 2
+        target_time = _extract_time_or_part(matched, parse_default_time(default_time))
+        remind_at = datetime.combine(current.date() + timedelta(days=days), target_time)
+        candidates.append(
+            _TimeCandidate(
+                matched.start(),
+                matched.end(),
+                remind_at,
+                "day_offset_time",
+            )
+        )
+    return candidates
+
+
+def _date_candidates(raw: str, current: datetime, default_time: str) -> list[_TimeCandidate]:
+    candidates = []
+    for pattern in (_DATE_ISO_RE, _DATE_NUMERIC_RE, _DATE_MONTH_RE):
+        for matched in pattern.finditer(raw):
+            candidate = _date_candidate_from_match(matched, current, default_time)
+            if candidate is not None:
+                candidates.append(
+                    _TimeCandidate(
+                        matched.start(),
+                        matched.end(),
+                        candidate,
+                        "explicit_date_time",
+                    )
+                )
+    return candidates
+
+
+def _date_candidate_from_match(
+    matched: re.Match[str],
+    current: datetime,
+    default_time: str,
+) -> datetime | None:
+    try:
+        year_text = matched.groupdict().get("year")
+        month_text = matched.group("month")
+        if month_text.lower() in _MONTHS:
+            month = _MONTHS[month_text.lower()]
+        else:
+            month = int(month_text)
+        year = current.year if not year_text else int(year_text)
+        if year < 100:
+            year += 2000
+        day = int(matched.group("day"))
+        hour_text = matched.groupdict().get("hour")
+        minute_text = matched.groupdict().get("minute")
+        if hour_text is None:
+            target_time = parse_default_time(default_time)
+        else:
+            target_time = time(hour=int(hour_text), minute=int(minute_text or 0))
+        candidate = datetime.combine(datetime(year, month, day).date(), target_time)
+    except (TypeError, ValueError):
+        return None
+    if not year_text and candidate <= current:
+        try:
+            candidate = datetime.combine(
+                datetime(current.year + 1, candidate.month, candidate.day).date(),
+                candidate.time(),
+            )
+        except ValueError:
+            return None
+    return candidate
 
 
 def _weekday_candidates(raw: str, current: datetime, default_time: str) -> list[_TimeCandidate]:
@@ -317,6 +461,37 @@ def _time_only_candidates(raw: str, current: datetime) -> list[_TimeCandidate]:
                 _TimeCandidate(matched.start(), matched.end(), candidate, "time_only")
             )
     return candidates
+
+
+def _needs_tomorrow_clarification(
+    raw: str,
+    candidate: _TimeCandidate,
+    current: datetime,
+) -> bool:
+    if current.hour >= AMBIGUOUS_TOMORROW_HOUR:
+        return False
+    if candidate.matched_pattern != "tomorrow_time":
+        return False
+    normalized = _normalize(raw)
+    if _contains_explicit_date(normalized):
+        return False
+    if re.search(r"\bпослезавтра\b", normalized):
+        return False
+    if re.search(r"\bчерез\s+(?:два|2)\s+дн", normalized):
+        return False
+    if re.search(r"\bчерез\s+день\b", normalized):
+        return False
+    if re.search(r"\b(?:следующ|ближайш|эту|этот)\b", normalized):
+        return False
+    return bool(re.search(r"\b(?:завтра|завтрашн\w*)\b", normalized))
+
+
+def _contains_explicit_date(normalized: str) -> bool:
+    return bool(
+        _DATE_ISO_RE.search(normalized)
+        or _DATE_NUMERIC_RE.search(normalized)
+        or _DATE_MONTH_RE.search(normalized)
+    )
 
 
 def _relative_delta(matched: re.Match[str], pattern_name: str) -> timedelta | None:
@@ -405,6 +580,9 @@ def _result(
     matched_pattern: str | None,
     error: str | None,
     needs_task: bool = False,
+    needs_tomorrow_clarification: bool = False,
+    clarification_today_at: datetime | None = None,
+    clarification_nextday_at: datetime | None = None,
 ) -> ReminderTextParseResult:
     return ReminderTextParseResult(
         success=success,
@@ -414,6 +592,9 @@ def _result(
         matched_pattern=matched_pattern,
         error=error,
         needs_task=needs_task,
+        needs_tomorrow_clarification=needs_tomorrow_clarification,
+        clarification_today_at=clarification_today_at,
+        clarification_nextday_at=clarification_nextday_at,
     )
 
 

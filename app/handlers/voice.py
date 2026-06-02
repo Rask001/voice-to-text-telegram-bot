@@ -1,18 +1,21 @@
 import asyncio
 import time
+from contextlib import suppress
 from datetime import date
 from pathlib import Path
+from typing import TypedDict
 
 from aiogram import Bot, F, Router
 from aiogram.types import Message
 from openai import OpenAIError, RateLimitError
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.access import LIMIT_EXPIRED_MESSAGE, record_voice_usage
 from app.access_service import check_user_access
 from app.analytics_service import track_event
 from app.config import Settings
-from app.formatters import analysis_list, format_response
+from app.formatters import analysis_list, format_response, format_voice_analysis
 from app.handlers.keyboards import note_keyboard
 from app.handlers.utils import (
     clean_title,
@@ -24,13 +27,23 @@ from app.handlers.utils import (
     send_html_chunks,
     send_text_chunks,
 )
-from app.models import VoiceNote
+from app.models import UserSettings, VoiceNote
 from app.openai_service import OpenAIInsufficientQuotaError, OpenAIService
 from app.preferences import get_response_mode
+from app.progress_messages import (
+    PROGRESS_UPDATE_INTERVAL_SECONDS,
+    ProgressPack,
+    get_random_progress_pack,
+)
 from app.tasks import normalize_tasks, serialize_tasks
+from app.voice_analysis import serialize_voice_analysis
 
 
 router = Router()
+
+
+class _StatusRef(TypedDict):
+    message: Message
 
 
 @router.message(F.voice)
@@ -48,7 +61,10 @@ async def handle_voice(
     duration_seconds = message.voice.duration
     processing_started_at = time.monotonic()
     current_tariff_type = ""
-    status = await message.answer("🎧 Голосовое получил. Проверяю лимиты...")
+    progress_pack = get_random_progress_pack()
+    status = await message.answer(progress_pack[0])
+    status_ref = _StatusRef(message=status)
+    progress_task: asyncio.Task[None] | None = None
     track_event(
         session_factory,
         "voice_received",
@@ -95,8 +111,8 @@ async def handle_voice(
                 settings=settings,
                 tariff_type=current_tariff_type,
             )
-            await safe_edit(
-                status,
+            status_ref["message"] = await safe_edit(
+                status_ref["message"],
                 denial_reason,
             )
             return
@@ -106,6 +122,9 @@ async def handle_voice(
     mp3_audio_path: Path | None = None
 
     try:
+        progress_task = asyncio.create_task(
+            _run_progress_updates(status_ref, progress_pack)
+        )
         track_event(
             session_factory,
             "voice_processing_started",
@@ -114,13 +133,12 @@ async def handle_voice(
             settings=settings,
             tariff_type=current_tariff_type,
         )
-        status = await safe_edit(status, "📥 Скачиваю аудио...")
         raw_audio_path = await download_voice(bot, message.voice.file_id)
         mp3_audio_path = await asyncio.to_thread(convert_to_mp3, raw_audio_path)
-        status = await safe_edit(status, "🎙 Расшифровываю речь...")
 
         transcript = await asyncio.to_thread(openai_service.transcribe, mp3_audio_path)
         if not transcript:
+            await _stop_progress_updates(progress_task)
             track_event(
                 session_factory,
                 "voice_processing_failed",
@@ -133,7 +151,10 @@ async def handle_voice(
                 settings=settings,
                 tariff_type=current_tariff_type,
             )
-            await safe_edit(status, "Не получилось получить текст из голосового.")
+            status_ref["message"] = await safe_edit(
+                status_ref["message"],
+                "Не получилось получить текст из голосового.",
+            )
             return
         track_event(
             session_factory,
@@ -144,8 +165,12 @@ async def handle_voice(
             tariff_type=current_tariff_type,
         )
 
-        status = await safe_edit(status, "🧠 Делаю краткое содержание и задачи...")
-        analysis = await asyncio.to_thread(openai_service.analyze, transcript)
+        analysis = await asyncio.to_thread(
+            openai_service.analyze,
+            transcript,
+            duration_seconds,
+        )
+        voice_analysis = analysis["voice_analysis"]
 
         with session_factory() as session:
             record_voice_usage(
@@ -160,6 +185,15 @@ async def handle_voice(
                 user_id,
                 settings.default_response_mode,
             )
+            user_settings = session.scalar(
+                select(UserSettings).where(UserSettings.telegram_user_id == user_id)
+            )
+            total_saved_seconds = 0
+            if user_settings is not None:
+                user_settings.total_saved_seconds = (
+                    user_settings.total_saved_seconds or 0
+                ) + int(voice_analysis["saved_seconds"])
+                total_saved_seconds = user_settings.total_saved_seconds
             note = VoiceNote(
                 telegram_user_id=user_id,
                 telegram_file_id=message.voice.file_id,
@@ -170,13 +204,13 @@ async def handle_voice(
                 action_items=serialize_tasks(normalize_tasks(analysis["action_items"])),
                 details=str(analysis.get("details", "")),
                 important_points="\n".join(analysis_list(analysis["important_points"])),
+                voice_analysis_json=serialize_voice_analysis(voice_analysis),
             )
             session.add(note)
             session.flush()
             note_id = note.id
             session.commit()
 
-        status = await safe_edit(status, "✅ Готово, сейчас появится.")
         track_event(
             session_factory,
             "voice_processed_success",
@@ -189,16 +223,23 @@ async def handle_voice(
             settings=settings,
             tariff_type=current_tariff_type,
         )
+        if progress_task is not None:
+            await progress_task
         result_messages = await send_html_chunks(
             message,
             format_response(response_mode, transcript, analysis),
             reply_markup=note_keyboard(note_id, source="fresh"),
         )
         result_message = result_messages[0]
+        analysis_messages = await send_html_chunks(
+            message,
+            format_voice_analysis(voice_analysis, total_saved_seconds),
+        )
         with session_factory() as session:
             note = session.get(VoiceNote, note_id)
             if note is not None:
                 note.result_message_id = result_message.message_id
+                note.analysis_message_ids = join_message_ids(analysis_messages)
                 session.commit()
         if response_mode == "full":
             sent_messages = await send_text_chunks(
@@ -213,6 +254,7 @@ async def handle_voice(
                     session.commit()
 
     except OpenAIInsufficientQuotaError:
+        await _stop_progress_updates(progress_task)
         _track_voice_failure(
             session_factory,
             message,
@@ -222,13 +264,14 @@ async def handle_voice(
             "insufficient_quota",
             "OpenAI insufficient quota",
         )
-        await safe_edit(
-            status,
+        status_ref["message"] = await safe_edit(
+            status_ref["message"],
             "Сейчас обработка временно недоступна: закончилась API-квота. "
             "Попробуйте позже."
         )
         logger.exception("OpenAI insufficient quota")
     except RateLimitError:
+        await _stop_progress_updates(progress_task)
         _track_voice_failure(
             session_factory,
             message,
@@ -238,12 +281,13 @@ async def handle_voice(
             "rate_limit",
             "OpenAI rate limit after retries",
         )
-        await safe_edit(
-            status,
+        status_ref["message"] = await safe_edit(
+            status_ref["message"],
             "OpenAI временно ограничил запросы. Попробуйте ещё раз чуть позже."
         )
         logger.exception("OpenAI rate limit after retries")
     except OpenAIError:
+        await _stop_progress_updates(progress_task)
         _track_voice_failure(
             session_factory,
             message,
@@ -253,12 +297,13 @@ async def handle_voice(
             "openai_error",
             "OpenAI API error",
         )
-        await safe_edit(
-            status,
+        status_ref["message"] = await safe_edit(
+            status_ref["message"],
             "OpenAI не смог обработать запрос. Проверь API key, модель и логи приложения."
         )
         logger.exception("OpenAI API error")
     except RuntimeError as exc:
+        await _stop_progress_updates(progress_task)
         _track_voice_failure(
             session_factory,
             message,
@@ -268,9 +313,10 @@ async def handle_voice(
             "runtime_error",
             str(exc),
         )
-        await safe_edit(status, str(exc))
+        status_ref["message"] = await safe_edit(status_ref["message"], str(exc))
         logger.exception("Runtime error while processing voice")
     except Exception as exc:
+        await _stop_progress_updates(progress_task)
         _track_voice_failure(
             session_factory,
             message,
@@ -280,12 +326,33 @@ async def handle_voice(
             type(exc).__name__,
             str(exc),
         )
-        await safe_edit(status, "Не удалось обработать голосовое. Проверь логи приложения.")
+        status_ref["message"] = await safe_edit(
+            status_ref["message"],
+            "Не удалось обработать голосовое. Проверь логи приложения.",
+        )
         logger.exception("Voice processing failed")
     finally:
         for path in (raw_audio_path, mp3_audio_path):
             if path and path.exists():
                 path.unlink(missing_ok=True)
+
+
+async def _run_progress_updates(
+    status_ref: _StatusRef,
+    progress_pack: ProgressPack,
+) -> None:
+    for progress_text in progress_pack[1:]:
+        await asyncio.sleep(PROGRESS_UPDATE_INTERVAL_SECONDS)
+        status_ref["message"] = await safe_edit(status_ref["message"], progress_text)
+
+
+async def _stop_progress_updates(progress_task: asyncio.Task[None] | None) -> None:
+    if progress_task is None:
+        return
+    if not progress_task.done():
+        progress_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await progress_task
 
 
 def _track_voice_failure(

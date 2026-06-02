@@ -41,6 +41,7 @@ class AccessStatus:
     trial_expires_at: datetime | None
     trial_days_left: int | None
     max_voice_seconds: int | None
+    total_saved_seconds: int
     denial_reason: str | None = None
     denial_code: str | None = None
 
@@ -247,6 +248,7 @@ def _build_access_status(
         trial_expires_at=user_settings.trial_expires_at,
         trial_days_left=trial_days_left,
         max_voice_seconds=plan.max_voice_seconds,
+        total_saved_seconds=user_settings.total_saved_seconds or 0,
         denial_reason=denial_reason,
         denial_code=denial_code,
     )

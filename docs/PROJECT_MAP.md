@@ -174,6 +174,7 @@
   - наследуется от `Base` из `app/db.py`;
   - используется в `app/handlers/`, `app/preferences.py`, `app/limits.py`, `app/access.py`, `app/reminder_service.py`;
   - `VoiceNote.action_items` хранит новые задачи JSON-массивом `{text, priority}`, старые записи могут быть newline-строками;
+  - `VoiceNote.voice_analysis_json` хранит мемный анализ голосового и fallback поддерживает старые записи без анализа;
   - `AnalyticsEvent.payload_json` хранит только служебный JSON без расшифровок и секретов;
   - при полной очистке пользовательской истории удаляются строки из `voice_notes`, но структура таблицы сохраняется.
 
@@ -314,7 +315,7 @@
 - Назначение: основной pipeline voice message.
 - Основные функции:
   - `handle_voice()`.
-- Связи: использует `check_user_access()`, `record_voice_usage()`, `OpenAIService`, `VoiceNote`, `format_response()`, `note_keyboard(source="fresh")`, utils для ffmpeg/download/chunking, `track_event()` для voice analytics.
+- Связи: использует `check_user_access()`, `record_voice_usage()`, `OpenAIService`, `VoiceNote`, `format_response()`, `note_keyboard(source="fresh")`, `get_random_progress_pack()` из `app/progress_messages.py`, utils для ffmpeg/download/chunking, `track_event()` для voice analytics.
 
 ### `app/handlers/callbacks.py`
 
@@ -347,6 +348,7 @@
 - Основные функции:
   - `format_response()` — выбирает short/full/tasks режим;
   - `format_short()`, `format_details()`, `format_tasks()`, `format_share()`;
+  - `format_voice_analysis()`, `format_share_voice_analysis()`;
   - `format_history()`, `format_history_item()`;
   - `format_profile()`, `format_my_id()`, `format_reminders_list()`, `format_reminder_created()`, `format_settings()`, `help_text()`;
   - `format_numbered_list()` — нумерованный список задач с priority-сортировкой;
@@ -354,8 +356,44 @@
 - Связи:
   - использует `AccessStatus` из `app/access.py`;
   - использует `normalize_tasks()`, `parse_stored_tasks()`, `sort_tasks_for_display()` из `app/tasks.py`;
+  - использует `app/voice_analysis.py` для длительности, уровней воды и типа голосового;
   - вызывается из `app/handlers/`;
   - `TELEGRAM_TEXT_LIMIT` импортируется handlers для chunking.
+
+### `app/voice_analysis.py`
+
+- Назначение: нормализация, хранение и справочники мемного анализа голосовых.
+- Основные классы:
+  - `VoiceAnalysis` — TypedDict структуры анализа.
+- Основные данные:
+  - `WATER_CLASSES` — 10 уровней воды;
+  - `VOICE_TYPES` — 10 типов голосового;
+  - `RARE_TITLES` — редкие титулы для высокой воды/многословности.
+- Основные функции:
+  - `normalize_voice_analysis()` — приводит OpenAI JSON к безопасной структуре;
+  - `fallback_voice_analysis()` — fallback для старых записей без анализа;
+  - `serialize_voice_analysis()`;
+  - `parse_voice_analysis_json()`;
+  - `water_class()`, `voice_type()`;
+  - `format_duration()`, `format_compact_duration()`.
+- Связи:
+  - используется в `app/openai_service.py`, `app/formatters.py`, `app/handlers/voice.py`, `app/handlers/callbacks.py`;
+  - не вызывает OpenAI и не знает о Telegram.
+
+### `app/progress_messages.py`
+
+- Назначение: локальные случайные наборы прогресс-сообщений для обработки voice.
+- Основные данные:
+  - `ORDINARY_PROGRESS_PACKS` — 24 обычных набора по 8 сообщений;
+  - `LEGENDARY_PROGRESS_PACKS` — 5 редких легендарных наборов;
+  - `LEGENDARY_PROGRESS_PROBABILITY` — вероятность легендарного набора 5%;
+  - `PROGRESS_UPDATE_INTERVAL_SECONDS` — интервал между статусами 1.7 секунды.
+- Основные функции:
+  - `get_random_progress_pack()` — выбирает набор перед обработкой voice;
+  - `validate_progress_packs()` — проверяет, что каждый набор содержит ровно 8 сообщений.
+- Связи:
+  - используется в `app/handlers/voice.py`;
+  - не использует OpenAI, Telegram API или SQLite.
 
 ### `app/analytics_service.py`
 
@@ -433,7 +471,9 @@
   - `parse_reminder_request()`;
   - `parse_default_time()`;
   - `now_in_timezone()`.
-- Связи: используется ручным `/remind`; поддерживает кнопки времени, ручной ввод, команды вида `/remind завтра 14:30 заехать в автосервис`, разговорные относительные фразы `через минуту`/`через 10`/`минут через 15`/`через пол часа`/`через пару часов`, дни недели и текст вида `позвонить Соне в 21:21`. Читает настройки через handler: `DEFAULT_TIMEZONE` и `DEFAULT_REMINDER_TIME`.
+- Основные данные:
+  - `AMBIGUOUS_TOMORROW_HOUR` — ночной порог для уточнения неоднозначного `завтра`.
+- Связи: используется ручным `/remind`; поддерживает кнопки времени, ручной ввод, команды вида `/remind завтра 14:30 заехать в автосервис`, разговорные относительные фразы `через минуту`/`через 10`/`минут через 15`/`через пол часа`/`через пару часов`, смещения по дням `послезавтра`/`через день`/`через два дня`, дни недели и текст вида `позвонить Соне в 21:21`. С 00:00 до 05:59 возвращает `needs_tomorrow_clarification=True` для `завтра` без явной даты, чтобы `app/handlers/reminders.py` показал выбор `Сегодня`/`Через день`. Читает настройки через handler: `DEFAULT_TIMEZONE` и `DEFAULT_REMINDER_TIME`.
 
 ### `app/runtime_state.py`
 
@@ -477,6 +517,7 @@
 - Связи:
   - получает `Settings` из `app/config.py`;
   - использует `normalize_tasks()` из `app/tasks.py`;
+  - использует `normalize_voice_analysis()` из `app/voice_analysis.py`;
   - вызывается из `app/handlers/voice.py`;
   - не знает о SQLite и Telegram.
 
@@ -624,6 +665,23 @@
   - обычный пользователь не имеет доступ к admin stats.
 - Связи: использует `app/analytics_service.py`, `app/handlers/admin.py`, `app/models.py`.
 
+### `tests/test_voice_analysis.py`
+
+- Назначение: unit-тесты мемного анализа голосовых.
+- Основные классы:
+  - `VoiceAnalysisTests`.
+- Основные проверки:
+  - `voice_analysis` парсится из OpenAI JSON;
+  - meme сохраняется в SQLite;
+  - старые записи без анализа не ломаются;
+  - `saved_seconds` не бывает меньше 0;
+  - `total_saved_seconds` увеличивается;
+  - formatter выводит анализ;
+  - share-блок содержит meme;
+  - rare title появляется только при высокой воде/многословности;
+  - prompt содержит запрет на токсичные шутки.
+- Связи: использует `app/voice_analysis.py`, `app/openai_service.py`, `app/formatters.py`, `app/models.py`.
+
 ### `tests/test_admin_service.py`
 
 - Назначение: unit-тесты сервисной части админки.
@@ -670,6 +728,8 @@
 - Основные проверки:
   - относительное время: `через минуту`, `через 10`, `через пол часа`, `через 10 минут`, `через 30 минут`, `через 1 час`;
   - `завтра 14:30`, `завтра утром`, `завтра днём`, `завтра вечером`;
+  - ночное неоднозначное `завтра` требует уточнения до 06:00 и не требует после;
+  - явная дата, `послезавтра`, `через день`, `через два дня` не требуют уточнения;
   - ввод только времени на сегодня или завтра;
   - неправильный формат возвращает `None`;
   - команда `/remind <время> <текст>` разделяет время и текст задачи.
@@ -682,6 +742,7 @@
   - `ReminderHandlerTests`.
 - Основные проверки:
   - текст со временем создает напоминание сразу и не показывает меню выбора времени;
+  - выбор `Сегодня`/`Через день` после ночного уточнения создает правильную дату;
   - текст без времени показывает меню выбора времени и не создает запись.
 - Связи: использует `app/handlers/reminders.py`, `app/db.py`, `app/models.py`.
 

@@ -58,6 +58,8 @@ def _ensure_sqlite_schema_updates(engine, database_url: str) -> None:
             _add_text_column(connection, columns, "voice_notes", "details_message_ids")
             _add_text_column(connection, columns, "voice_notes", "tasks_message_ids")
             _add_text_column(connection, columns, "voice_notes", "share_message_ids")
+            _add_text_column(connection, columns, "voice_notes", "analysis_message_ids")
+            _add_text_column(connection, columns, "voice_notes", "voice_analysis_json")
             if "result_message_id" not in columns:
                 connection.execute(
                     text("ALTER TABLE voice_notes ADD COLUMN result_message_id INTEGER")
@@ -91,6 +93,7 @@ def _ensure_sqlite_schema_updates(engine, database_url: str) -> None:
             _add_integer_column(connection, columns, "user_settings", "minutes_limit_month", 15)
             _add_integer_column(connection, columns, "user_settings", "voices_used_today", 0)
             _add_integer_column(connection, columns, "user_settings", "daily_voice_limit", 3)
+            _add_integer_column(connection, columns, "user_settings", "total_saved_seconds", 0)
             if "usage_date" not in columns:
                 connection.execute(
                     text("ALTER TABLE user_settings ADD COLUMN usage_date DATE")

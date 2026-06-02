@@ -9,6 +9,7 @@ from openai import OpenAI, RateLimitError
 
 from app.config import Settings
 from app.tasks import normalize_tasks
+from app.voice_analysis import normalize_voice_analysis
 
 
 logger = logging.getLogger(__name__)
@@ -38,10 +39,10 @@ class OpenAIService:
         text = getattr(transcript, "text", "")
         return text.strip()
 
-    def analyze(self, transcript: str) -> dict[str, object]:
+    def analyze(self, transcript: str, duration_seconds: int = 0) -> dict[str, object]:
         prompt = (
             "Ты помощник для обработки длинных голосовых заметок. "
-            "Верни только JSON с ключами title, summary, tasks, details, important_points. "
+            "Верни только JSON с ключами title, summary, tasks, details, important_points, voice_analysis. "
             "title: короткий заголовок в 2-5 слов на языке пользователя, без кавычек и точки в конце. "
             "summary: очень короткое содержание на русском в 1-2 предложениях. "
             "details: 3-6 коротких предложений с полезными подробностями. "
@@ -54,7 +55,28 @@ class OpenAIService:
             "очень важно, самое главное, главное не забыть, обязательно, срочно, "
             "не забудь, критично, в первую очередь, обязательно напомни и похожие. "
             "Не помечай задачу важной без явного акцента. "
-            "Если задач нет, верни пустой массив tasks.\n\n"
+            "Если задач нет, верни пустой массив tasks. "
+            "voice_analysis: объект с ключами meaningful_duration_seconds, water_percent, "
+            "wordiness_score, quality_score, voice_type_level, water_level, verdict_level, "
+            "memorable_quote, verdict, meme, rare_title. "
+            f"Полная длительность голосового: {duration_seconds} секунд. "
+            "meaningful_duration_seconds — примерная длительность полезной содержательной части, "
+            "не больше полной длительности. water_percent 0-100. wordiness_score и quality_score 0-10. "
+            "voice_type_level, water_level, verdict_level — числа 1-10. "
+            "rare_title возвращай только если wordiness_score >= 9.5 или water_percent >= 90, иначе пустую строку. "
+            "Для voice_analysis сделай verdict и meme заметно жёстче, смешнее и вируснее. "
+            "Тон: жёсткий сарказм, цинично, коротко, мемно, без канцелярита и без бережной душнины. "
+            "Пиши так, чтобы результат хотелось переслать автору голосового. "
+            "verdict: короткий едкий вывод о соотношении пользы, воды и драматургии голосового. "
+            "meme: 1-2 коротких предложения, максимально пересылаемый мемный вывод, желательно с короткой цитатой из голосового. "
+            "memorable_quote: самая смешная или характерная фраза из голосового, если она есть. "
+            "Можно высмеивать длину голосового, воду, драматургию, формат аудиокниги, "
+            "фразы вроде 'короче', 'ну в общем', 'я быстро', и то, что всё могло быть одним текстовым сообщением. "
+            "Можно использовать едкие формулировки, но бей по формату сообщения, а не по человеку. "
+            "Нельзя: оскорблять человека как личность, делать выводы о личности автора, устраивать травлю, "
+            "угрожать, использовать мат, затрагивать внешность, национальность, пол, здоровье, религию или политику. "
+            "Запрещено: унижения, личностные оскорбления, фразы вроде 'автор тупой', "
+            "'человек не умеет говорить', 'что за бред'.\n\n"
             f"Текст расшифровки:\n{transcript}"
         )
 
@@ -77,6 +99,7 @@ class OpenAIService:
                 "action_items": [],
                 "details": "",
                 "important_points": [],
+                "voice_analysis": normalize_voice_analysis({}, duration_seconds),
             }
 
         tasks = data.get("tasks")
@@ -89,6 +112,10 @@ class OpenAIService:
             "action_items": normalize_tasks(tasks),
             "details": str(data.get("details", "")).strip(),
             "important_points": _as_string_list(data.get("important_points")),
+            "voice_analysis": normalize_voice_analysis(
+                data.get("voice_analysis"),
+                duration_seconds,
+            ),
         }
 
     def _with_rate_limit_retry(self, request: Callable[[], T], label: str) -> T:

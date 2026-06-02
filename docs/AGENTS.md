@@ -58,6 +58,7 @@
 Читать:
 
 - `app/openai_service.py`
+- `app/voice_analysis.py`, если меняется мемный анализ;
 - `docs/ARCHITECTURE.md`, раздел OpenAI
 - `docs/FEATURES.md`, разделы OpenAI и задач
 
@@ -66,12 +67,15 @@
 - JSON keys, которые ожидают `app/openai_service.py`, `app/tasks.py`, `app/handlers/voice.py`;
 - fallback на invalid JSON;
 - обратную совместимость `action_items`/`tasks`.
+- `voice_analysis` должен оставаться в том же OpenAI-запросе, без отдельного запроса;
+- prompt для meme должен запрещать мат, унижения и оскорбления личности.
 
 ### Если нужно изменить обработку voice
 
 Читать:
 
 - `app/handlers/voice.py`: `handle_voice()`;
+- `app/progress_messages.py`: локальные наборы progress messages;
 - `app/handlers/utils.py`: `download_voice()`, `convert_to_mp3()`;
 - `app/access_service.py`: `check_user_access()`;
 - `app/access.py`: `record_voice_usage()`;
@@ -81,6 +85,9 @@
 
 - лимит до OpenAI;
 - status message;
+- progress pack выбирается один раз на voice, каждый pack должен содержать ровно 8 сообщений;
+- обычные progress packs живут в `ORDINARY_PROGRESS_PACKS`, редкие легендарные — в `LEGENDARY_PROGRESS_PACKS`;
+- progress updater должен листать выбранный набор равномерно с `PROGRESS_UPDATE_INTERVAL_SECONDS` 1.5-2.0 секунды, а не привязывать статусы к реальным этапам OpenAI/SQLite;
 - временные файлы удаляются;
 - запись появляется в `VoiceNote`;
 - inline-кнопки используют SQLite.
@@ -113,7 +120,32 @@
 - fresh callbacks используют `fresh_*`;
 - старый `note:*` поддерживается для совместимости;
 - защита от дублей хранится в полях `*_message_ids`;
+- `fresh_analysis` использует `VoiceNote.voice_analysis_json` и `analysis_message_ids`;
 - быстрые повторные клики идут через `BUTTON_LOCKS`.
+
+### Если нужно изменить мемный анализ голосового
+
+Читать:
+
+- `app/voice_analysis.py`;
+- `app/openai_service.py`;
+- `app/formatters.py`: `format_voice_analysis()`, `format_share_voice_analysis()`;
+- `app/handlers/voice.py`;
+- `app/handlers/callbacks.py`;
+- `app/handlers/keyboards.py`;
+- `app/models.py`: `VoiceNote.voice_analysis_json`, `UserSettings.total_saved_seconds`.
+
+Важно:
+
+- не делать отдельный OpenAI-запрос;
+- старые записи без `voice_analysis_json` должны открываться через fallback;
+- history callbacks не должны вызывать OpenAI;
+- `saved_seconds` всегда `max(0, duration - meaningful_duration)`;
+- `total_saved_seconds` увеличивается после успешной новой обработки;
+- `voice_type_level` должен оставаться согласованным с `wordiness_score`, а `water_level` — с `water_percent`;
+- мем должен быть жёстким, цинично-саркастичным и пересылаемым, но без мата, унижений и оскорблений личности;
+- шутка должна бить по формату голосового, а не по человеку;
+- share-блок должен содержать короткую вирусную версию анализа.
 
 ### Если нужно изменить callback data
 
@@ -265,6 +297,10 @@
 - простой текстовый парсер времени живет только в `app/reminder_parser.py` и не использует OpenAI;
 - основная точка входа parser — `parse_reminder_text()`, старые функции остаются совместимыми обертками;
 - разговорные относительные фразы вроде `через минуту`, `через 10`, `минут через 15`, `через пол часа`, `через пару часов` должны парситься там же;
+- `послезавтра`, `через день`, `через два дня` должны парситься как смещения по дням и не попадать в ночное уточнение `завтра`;
+- с 00:00 до 05:59 `завтра` без явной даты должно возвращать `needs_tomorrow_clarification=True`; порог хранится в `AMBIGUOUS_TOMORROW_HOUR`;
+- уточнение даты использует callback data `reminder_tomorrow_today:`, `reminder_tomorrow_nextday:`, `reminder_tomorrow_cancel:`;
+- ручной ввод времени после уже сохраненной задачи тоже должен проходить через `parse_reminder_text()` вместе с `task_text`, чтобы ночное `завтра 11:00` не обходило уточнение;
 - service words cleanup (`напомни`, `напомни мне`, `поставь напоминание`, `чтобы`, `пожалуйста`) тоже живет в parser;
 - если пользователь в FSM `/remind` прислал текст уже со временем, handler должен сразу создать reminder без меню выбора времени;
 - если parser нашел время, но задача пустая, handler должен спросить `Что напомнить?`, а не создавать пустой reminder;

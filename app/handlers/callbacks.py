@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.analytics_service import track_event
 from app.config import Settings
-from app.formatters import format_details, format_share, format_tasks
+from app.formatters import format_details, format_share, format_tasks, format_voice_analysis
 from app.handlers.constants import BUTTON_LOCKS
 from app.handlers.utils import (
     join_message_ids,
@@ -13,8 +13,9 @@ from app.handlers.utils import (
     send_html_chunks,
     send_text_chunks,
 )
-from app.models import VoiceNote
+from app.models import UserSettings, VoiceNote
 from app.tasks import parse_stored_tasks, split_stored_list
+from app.voice_analysis import parse_voice_analysis_json
 
 
 router = Router()
@@ -135,9 +136,36 @@ async def fresh_note_callback(
                     format_share(
                         note.summary,
                         parse_stored_tasks(note.action_items),
+                        parse_voice_analysis_json(
+                            note.voice_analysis_json,
+                            note.duration_seconds,
+                        ),
                     )
                 )
                 note.share_message_ids = join_message_ids(sent_messages)
+                session.commit()
+            elif action == "analysis":
+                if note.analysis_message_ids:
+                    await callback.answer("Этот блок уже был отправлен выше 👆")
+                    return
+                await callback.answer("Открываю...")
+                user_settings = session.scalar(
+                    select(UserSettings).where(UserSettings.telegram_user_id == callback.from_user.id)
+                )
+                total_saved_seconds = (
+                    user_settings.total_saved_seconds if user_settings is not None else 0
+                )
+                sent_messages = await send_html_chunks(
+                    callback.message,
+                    format_voice_analysis(
+                        parse_voice_analysis_json(
+                            note.voice_analysis_json,
+                            note.duration_seconds,
+                        ),
+                        total_saved_seconds or 0,
+                    ),
+                )
+                note.analysis_message_ids = join_message_ids(sent_messages)
                 session.commit()
             else:
                 await callback.answer("Неизвестное действие", show_alert=True)
@@ -164,7 +192,7 @@ async def history_note_callback(
     except ValueError:
         await callback.answer("Запись не найдена. Возможно, она была удалена.", show_alert=True)
         return
-    if action not in {"full_text", "tasks", "details", "share"}:
+    if action not in {"full_text", "tasks", "details", "share", "analysis"}:
         await callback.answer("Неизвестное действие", show_alert=True)
         return
 
@@ -219,5 +247,23 @@ async def history_note_callback(
                 format_share(
                     note.summary,
                     parse_stored_tasks(note.action_items),
+                    parse_voice_analysis_json(
+                        note.voice_analysis_json,
+                        note.duration_seconds,
+                    ),
+                ),
+            )
+        elif action == "analysis":
+            user_settings = session.scalar(
+                select(UserSettings).where(UserSettings.telegram_user_id == callback.from_user.id)
+            )
+            await send_html_chunks(
+                callback.message,
+                format_voice_analysis(
+                    parse_voice_analysis_json(
+                        note.voice_analysis_json,
+                        note.duration_seconds,
+                    ),
+                    (user_settings.total_saved_seconds if user_settings is not None else 0) or 0,
                 ),
             )

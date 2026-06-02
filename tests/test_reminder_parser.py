@@ -66,6 +66,77 @@ class ReminderParserTests(unittest.TestCase):
             datetime(2026, 6, 2, 14, 30),
         )
 
+    def test_ambiguous_tomorrow_at_5_requires_clarification(self) -> None:
+        parsed = parse_reminder_text(
+            "разбуди меня завтра в 11:00",
+            now=datetime(2026, 6, 2, 5, 0),
+        )
+
+        self.assertFalse(parsed.success)
+        self.assertTrue(parsed.needs_tomorrow_clarification)
+        self.assertEqual(parsed.clarification_today_at, datetime(2026, 6, 2, 11, 0))
+        self.assertEqual(parsed.clarification_nextday_at, datetime(2026, 6, 3, 11, 0))
+        self.assertEqual(parsed.task_text, "разбуди меня")
+
+    def test_ambiguous_tomorrow_morning_at_2_requires_clarification(self) -> None:
+        parsed = parse_reminder_text(
+            "разбуди меня завтра утром",
+            now=datetime(2026, 6, 2, 2, 0),
+        )
+
+        self.assertTrue(parsed.needs_tomorrow_clarification)
+        self.assertEqual(parsed.clarification_today_at, datetime(2026, 6, 2, 9, 0))
+        self.assertEqual(parsed.clarification_nextday_at, datetime(2026, 6, 3, 9, 0))
+
+    def test_tomorrow_after_6_does_not_require_clarification(self) -> None:
+        parsed = parse_reminder_text(
+            "разбуди меня завтра в 11:00",
+            now=datetime(2026, 6, 2, 7, 0),
+        )
+
+        self.assertTrue(parsed.success)
+        self.assertFalse(parsed.needs_tomorrow_clarification)
+        self.assertEqual(parsed.remind_at, datetime(2026, 6, 3, 11, 0))
+
+    def test_day_after_tomorrow_does_not_require_clarification(self) -> None:
+        parsed = parse_reminder_text(
+            "разбуди меня послезавтра в 11:00",
+            now=datetime(2026, 6, 2, 2, 0),
+        )
+
+        self.assertFalse(parsed.needs_tomorrow_clarification)
+        self.assertTrue(parsed.success)
+        self.assertEqual(parsed.remind_at, datetime(2026, 6, 4, 11, 0))
+
+    def test_relative_days_do_not_require_tomorrow_clarification(self) -> None:
+        parsed = parse_reminder_text(
+            "разбуди меня через два дня в 11:00",
+            now=datetime(2026, 6, 2, 2, 0),
+        )
+
+        self.assertFalse(parsed.needs_tomorrow_clarification)
+        self.assertTrue(parsed.success)
+        self.assertEqual(parsed.remind_at, datetime(2026, 6, 4, 11, 0))
+
+        parsed_next_day = parse_reminder_text(
+            "разбуди меня через день в 11:00",
+            now=datetime(2026, 6, 2, 2, 0),
+        )
+
+        self.assertFalse(parsed_next_day.needs_tomorrow_clarification)
+        self.assertTrue(parsed_next_day.success)
+        self.assertEqual(parsed_next_day.remind_at, datetime(2026, 6, 3, 11, 0))
+
+    def test_explicit_date_does_not_require_clarification(self) -> None:
+        parsed = parse_reminder_text(
+            "разбуди меня 03.06 в 11:00",
+            now=datetime(2026, 6, 2, 2, 0),
+        )
+
+        self.assertTrue(parsed.success)
+        self.assertFalse(parsed.needs_tomorrow_clarification)
+        self.assertEqual(parsed.remind_at, datetime(2026, 6, 3, 11, 0))
+
     def test_tomorrow_morning(self) -> None:
         self.assertEqual(
             parse_reminder_time_text("завтра утром", now=self.now),
