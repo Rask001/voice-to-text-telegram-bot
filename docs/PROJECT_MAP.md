@@ -197,6 +197,7 @@
   - `VoiceNote` — сохраненная расшифровка, summary, tasks, details, message ids;
   - `Reminder` — ручные и будущие task/history/AI напоминания;
   - `AppConfig` — небольшие настройки бота, включая кастомный `/start`;
+  - `Payment` — Telegram Stars invoices и successful payments;
   - `UserSettings` — настройки пользователя, тариф, counters, trial/month limits.
 - Основные функции: нет.
 - Связи:
@@ -205,6 +206,8 @@
   - `VoiceNote.action_items` хранит новые задачи JSON-массивом `{text, priority}`, старые записи могут быть newline-строками;
   - `VoiceNote.voice_analysis_json` хранит мемный анализ голосового и fallback поддерживает старые записи без анализа;
   - `AnalyticsEvent.payload_json` хранит только служебный JSON без расшифровок и секретов;
+  - `Payment` хранит `telegram_payment_charge_id`, `payload`, `amount`, `tariff`, `status`;
+  - `UserSettings.tariff_expires_at` хранит срок paid-тарифа Standard/Premium;
   - при полной очистке пользовательской истории удаляются строки из `voice_notes`, но структура таблицы сохраняется.
 
 ## `app/handlers/`
@@ -216,7 +219,34 @@
 - Назначение: aggregate router и публичные exports для тестов.
 - Основные классы: нет.
 - Основные функции: нет.
-- Связи: подключает роутеры `start`, `system`, `settings`, `profile`, `help`, `history`, `reminders`, `admin`, `voice`, `callbacks`, `menu`, `fallbacks`.
+- Связи: подключает роутеры `start`, `system`, `settings`, `profile`, `help`, `history`, `reminders`, `admin`, `payments`, `voice`, `callbacks`, `menu`, `fallbacks`.
+
+### `app/payment_service.py`
+
+- Назначение: бизнес-логика MVP Telegram Stars.
+- Основные классы:
+  - `PaymentPayload` — разобранный invoice payload;
+  - `ActivationResult` — результат обработки successful payment.
+- Основные функции:
+  - `create_payment_payload()` — создает короткий payload `stars:<tariff>:<telegram_id>:<timestamp>:<nonce>`;
+  - `parse_payment_payload()` — разбирает payload;
+  - `validate_payment_payload()` — проверяет payload, пользователя, currency `XTR` и сумму;
+  - `create_pending_payment()` — сохраняет pending запись перед invoice;
+  - `process_successful_payment()` — обрабатывает successful payment, защищает от дублей и активирует тариф;
+  - `activate_paid_tariff()` — выдает/продлевает Standard/Premium на 30 дней;
+  - `can_buy_tariff()` — не дает Owner/Brother затираться paid-тарифом.
+- Связи: используется `app/handlers/payments.py`, `app/handlers/keyboards.py`, тестами `tests/test_payment_service.py`; пишет `Payment` и `UserSettings.tariff_expires_at`.
+
+### `app/handlers/payments.py`
+
+- Назначение: aiogram handlers для Telegram Stars.
+- Основные классы: нет.
+- Основные функции:
+  - `show_payment_options()` — показывает Standard/Premium;
+  - `buy_tariff()` — создает pending payment и отправляет invoice;
+  - `pre_checkout()` — валидирует pre-checkout query;
+  - `successful_payment()` — выдает тариф после Telegram successful payment.
+- Связи: подключен в aggregate router; использует `payment_service.py`, `keyboards.py`, `UserSettings`.
 
 ### `app/handlers/constants.py`
 

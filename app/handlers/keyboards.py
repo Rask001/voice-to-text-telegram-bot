@@ -18,7 +18,9 @@ from app.handlers.constants import (
     MODE_LABELS,
 )
 from app.models import Reminder, VoiceNote
+from app.payment_service import STARS_TARIFFS
 from app.reminder_parser import REMINDER_TIME_CHOICES
+from app.tariffs import PREMIUM, STANDARD
 
 
 def main_keyboard() -> ReplyKeyboardMarkup:
@@ -45,6 +47,38 @@ def reminders_menu_keyboard() -> ReplyKeyboardMarkup:
         resize_keyboard=True,
         is_persistent=True,
     )
+
+
+def profile_payment_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="⭐ Купить тариф", callback_data="pay:show")]
+        ]
+    )
+
+
+def payment_options_keyboard(current_tariff: str | None = None) -> InlineKeyboardMarkup:
+    keyboard = []
+    standard = STARS_TARIFFS[STANDARD]
+    premium = STARS_TARIFFS[PREMIUM]
+    if current_tariff != PREMIUM:
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    text=f"⭐ Standard — {standard['amount']} Stars / 30 дней",
+                    callback_data=f"pay:tariff:{STANDARD}",
+                )
+            ]
+        )
+    keyboard.append(
+        [
+            InlineKeyboardButton(
+                text=f"⭐ Premium — {premium['amount']} Stars / 30 дней",
+                callback_data=f"pay:tariff:{PREMIUM}",
+            )
+        ]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
 def note_keyboard(note_id: int, source: str) -> InlineKeyboardMarkup:

@@ -10,6 +10,7 @@ from app.handlers.fallbacks import router as fallbacks_router
 from app.handlers.help import router as help_router
 from app.handlers.history import _send_history, history_callback, router as history_router
 from app.handlers.menu import router as menu_router
+from app.handlers.payments import router as payments_router
 from app.handlers.profile import router as profile_router
 from app.handlers.reminders import router as reminders_router
 from app.handlers.settings import router as settings_router
@@ -27,6 +28,7 @@ router.include_router(help_router)
 router.include_router(history_router)
 router.include_router(reminders_router)
 router.include_router(admin_router)
+router.include_router(payments_router)
 router.include_router(voice_router)
 router.include_router(callbacks_router)
 router.include_router(menu_router)

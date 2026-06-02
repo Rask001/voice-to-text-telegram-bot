@@ -16,7 +16,7 @@ from app.access_service import check_user_access
 from app.analytics_service import track_event
 from app.config import Settings
 from app.formatters import analysis_list, format_response, format_voice_analysis
-from app.handlers.keyboards import note_keyboard
+from app.handlers.keyboards import note_keyboard, profile_payment_keyboard
 from app.handlers.utils import (
     clean_title,
     convert_to_mp3,
@@ -117,6 +117,7 @@ async def handle_voice(
             status_ref["message"] = await safe_edit(
                 status_ref["message"],
                 denial_reason,
+                reply_markup=profile_payment_keyboard(),
             )
             return
         session.commit()

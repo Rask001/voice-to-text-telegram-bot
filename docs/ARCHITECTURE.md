@@ -196,6 +196,7 @@ handlers use session_factory per operation
 
 - `voice_notes` — история обработок и кэш результатов;
 - `user_settings` — тариф, response mode, counters, trial/month limits;
+- `payments` — Telegram Stars invoices и successful payments;
 - `analytics_events` — локальные события использования и admin stats;
 - `reminders` — ручные и будущие task/history/AI напоминания;
 - `app_config` — небольшие настройки бота, включая owner-managed start text;
@@ -651,11 +652,37 @@ history tests
 
 ## Монетизация Telegram Stars
 
-Текущая архитектура подготовлена через:
+```text
+/profile
+↓
+⭐ Купить тариф
+↓
+pay:show
+↓
+Standard/Premium options
+↓
+send_invoice(currency=XTR)
+↓
+pre_checkout_query validates payload + tariff + amount
+↓
+successful_payment
+↓
+process_successful_payment()
+↓
+payments row paid
+↓
+UserSettings.tariff_type + tariff_expires_at
+```
 
-- `tariff_type` в `UserSettings`;
-- тарифные планы в `app/tariffs.py`;
-- единый gate `check_user_access()`;
-- messages о подписке в `app/access.py`.
+MVP оплаты живёт в:
 
-Для Stars достаточно добавить платежный handler, который после успешной оплаты меняет `user_settings.tariff_type` на `standard` или `premium`.
+- `app/payment_service.py` — цены, payload, validation, pending/paid/duplicate, выдача тарифа;
+- `app/handlers/payments.py` — inline callbacks, invoice, `pre_checkout_query`, `successful_payment`;
+- `app/models.py:Payment` — таблица `payments`;
+- `app/models.py:UserSettings.tariff_expires_at` — срок paid-тарифа.
+
+Telegram Stars использует `currency=XTR` и пустой `provider_token`. Реальных payment-секретов в `.env` нет.
+
+Тариф выдаётся только после `successful_payment`, не после `pre_checkout_query`. Дубликат по `telegram_payment_charge_id` не продлевает тариф повторно.
+
+Owner и `brother` не затираются оплатой: если такой пользователь пытается купить тариф, бот показывает, что текущий доступ уже особый.

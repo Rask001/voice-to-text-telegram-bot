@@ -94,6 +94,10 @@ def _ensure_sqlite_schema_updates(engine, database_url: str) -> None:
             _add_integer_column(connection, columns, "user_settings", "voices_used_today", 0)
             _add_integer_column(connection, columns, "user_settings", "daily_voice_limit", 3)
             _add_integer_column(connection, columns, "user_settings", "total_saved_seconds", 0)
+            if "tariff_expires_at" not in columns:
+                connection.execute(
+                    text("ALTER TABLE user_settings ADD COLUMN tariff_expires_at DATETIME")
+                )
             if "usage_date" not in columns:
                 connection.execute(
                     text("ALTER TABLE user_settings ADD COLUMN usage_date DATE")

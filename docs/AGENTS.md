@@ -257,17 +257,23 @@
 
 Читать:
 
+- `app/payment_service.py`;
+- `app/handlers/payments.py`;
+- `app/handlers/keyboards.py`;
 - `app/access.py`;
 - `app/tariffs.py`;
 - `app/models.py`;
-- `app/handlers/admin.py`;
-- future payment handlers inside `app/handlers/`;
-- Telegram payment docs отдельно.
+- `docs/ARCHITECTURE.md`, раздел "Монетизация Telegram Stars";
 
-Ожидаемая точка расширения:
+Проверить:
 
-- после успешной оплаты менять `UserSettings.tariff_type` на `standard` или `premium`;
-- не ломать `check_user_access()`.
+- Telegram Stars invoice использует `currency=XTR`;
+- provider token для Stars пустой;
+- тариф выдается только после `successful_payment`;
+- `pre_checkout_query` проверяет payload, tariff и amount;
+- Owner и `brother` не затираются оплатой;
+- duplicate `telegram_payment_charge_id` не продлевает тариф повторно;
+- цены менять в `app/payment_service.py:STARS_TARIFFS`.
 
 ### Если нужно изменить админские команды
 

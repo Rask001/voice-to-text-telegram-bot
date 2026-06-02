@@ -56,8 +56,35 @@
 - `voices_used_today INTEGER DEFAULT 0`
 - `daily_voice_limit INTEGER DEFAULT 3`
 - `total_saved_seconds INTEGER DEFAULT 0`
+- `tariff_expires_at DATETIME`
 - `usage_date DATE`
 - `minutes_month_key VARCHAR(7) DEFAULT ''`
+
+### `payments`
+
+Хранит Telegram Stars invoices и successful payments.
+
+Поля:
+
+- `id INTEGER PRIMARY KEY`
+- `telegram_id BIGINT`
+- `provider VARCHAR(40) DEFAULT 'telegram_stars'`
+- `currency VARCHAR(10) DEFAULT 'XTR'`
+- `amount INTEGER`
+- `tariff VARCHAR(30)`
+- `payload VARCHAR(255)`
+- `telegram_payment_charge_id VARCHAR(255)`
+- `provider_payment_charge_id VARCHAR(255)`
+- `status VARCHAR(20) DEFAULT 'pending'`
+- `created_at DATETIME DEFAULT CURRENT_TIMESTAMP`
+- `paid_at DATETIME NULL`
+
+Статусы:
+
+- `pending`
+- `paid`
+- `failed`
+- `duplicate`
 
 ### `daily_usage`
 
@@ -161,6 +188,7 @@ Legacy таблица старого дневного счетчика.
 - `ADD COLUMN voices_used_today INTEGER DEFAULT 0`
 - `ADD COLUMN daily_voice_limit INTEGER DEFAULT 3`
 - `ADD COLUMN total_saved_seconds INTEGER DEFAULT 0`
+- `ADD COLUMN tariff_expires_at DATETIME`
 - `ADD COLUMN usage_date DATE`
 - `ADD COLUMN minutes_month_key VARCHAR(7) DEFAULT ''`
 
@@ -171,7 +199,7 @@ Legacy таблица старого дневного счетчика.
 
 Для `reminders` ручных `ALTER TABLE` пока нет: таблица создается через `Base.metadata.create_all()` как новая таблица.
 
-Для `app_config` ручных `ALTER TABLE` пока нет: таблица создается через `Base.metadata.create_all()` как новая таблица.
+Для `app_config` и `payments` ручных `ALTER TABLE` пока нет: таблицы создаются через `Base.metadata.create_all()` как новые таблицы.
 
 ## Очистка Пользовательской Истории
 
@@ -213,7 +241,7 @@ Alembic стоит подключать, когда появится хотя б
 
 - продакшен-деплой с несколькими окружениями;
 - PostgreSQL или другая серверная БД;
-- платежи Telegram Stars и таблицы транзакций/подписок;
+- расширение Telegram Stars до подписок, возвратов и отдельной таблицы subscription periods;
 - необходимость удалить legacy `daily_usage`;
 - переименование колонок;
 - изменение типов колонок;
@@ -222,10 +250,10 @@ Alembic стоит подключать, когда появится хотя б
 
 ## Потенциальные Будущие Миграции
 
-1. Создать таблицы платежей:
-   - `payments`
+1. Расширить таблицы платежей:
    - `subscriptions`
    - `telegram_star_transactions`
+   - индексы/unique constraints на charge id
 
 2. Удалить legacy `daily_usage` после проверки, что больше нет старого кода и отчетов, которые его читают.
 

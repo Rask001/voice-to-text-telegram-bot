@@ -7,7 +7,7 @@ from app.analytics_service import track_event
 from app.access_service import check_user_access
 from app.config import Settings
 from app.formatters import format_my_id, format_profile
-from app.handlers.keyboards import main_keyboard
+from app.handlers.keyboards import main_keyboard, profile_payment_keyboard
 
 
 router = Router()
@@ -31,7 +31,7 @@ async def profile(
             settings,
             session_factory,
         ),
-        reply_markup=main_keyboard(),
+        reply_markup=profile_payment_keyboard(),
     )
 
 

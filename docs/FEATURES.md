@@ -532,6 +532,38 @@ Callback data:
 - `_resolve_tariff_type()`
 - `_apply_plan_limits()`
 
+## Telegram Stars Payments
+
+Описание: MVP покупки Standard/Premium через Telegram Stars.
+
+Основные файлы:
+
+- `app/payment_service.py`
+- `app/handlers/payments.py`
+- `app/handlers/keyboards.py`
+- `app/models.py`
+- `app/access.py`
+
+Ключевые функции:
+
+- `create_payment_payload()`
+- `validate_payment_payload()`
+- `create_pending_payment()`
+- `process_successful_payment()`
+- `activate_paid_tariff()`
+- `pre_checkout()`
+- `successful_payment()`
+
+Правила:
+
+- `Standard` стоит 199 Stars на 30 дней;
+- `Premium` стоит 499 Stars на 30 дней;
+- цены лежат в `STARS_TARIFFS`;
+- тариф активируется только после `successful_payment`;
+- `pre_checkout_query` проверяет payload, тариф и сумму;
+- Owner и По-братски от Тоши не затираются оплатой;
+- дубликат `telegram_payment_charge_id` не продлевает тариф повторно.
+
 ## Проверка Лимитов
 
 Описание: лимит проверяется перед скачиванием аудио и OpenAI.

@@ -87,6 +87,28 @@ class AppConfig(Base):
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class Payment(Base):
+    __tablename__ = "payments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    telegram_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    provider: Mapped[str] = mapped_column(String(40), default="telegram_stars", index=True)
+    currency: Mapped[str] = mapped_column(String(10), default="XTR")
+    amount: Mapped[int] = mapped_column(Integer)
+    tariff: Mapped[str] = mapped_column(String(30), index=True)
+    payload: Mapped[str] = mapped_column(String(255), index=True)
+    telegram_payment_charge_id: Mapped[str] = mapped_column(String(255), default="", index=True)
+    provider_payment_charge_id: Mapped[str] = mapped_column(String(255), default="")
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=datetime.now,
+        server_default=func.now(),
+        index=True,
+    )
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class UserSettings(Base):
     __tablename__ = "user_settings"
 
@@ -111,5 +133,9 @@ class UserSettings(Base):
     voices_used_today: Mapped[int] = mapped_column(Integer, default=0)
     daily_voice_limit: Mapped[int] = mapped_column(Integer, default=3)
     total_saved_seconds: Mapped[int] = mapped_column(Integer, default=0)
+    tariff_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     usage_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     minutes_month_key: Mapped[str] = mapped_column(String(7), default="")

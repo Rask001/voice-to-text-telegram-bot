@@ -23,7 +23,7 @@ from app.handlers.constants import (
     MENU_SETTINGS,
 )
 from app.handlers.history import _send_history
-from app.handlers.keyboards import main_keyboard, reminders_menu_keyboard
+from app.handlers.keyboards import main_keyboard, profile_payment_keyboard, reminders_menu_keyboard
 from app.handlers.profile import build_profile_text
 from app.handlers.reminders import send_user_reminders, start_reminder_creation
 from app.handlers.settings import settings_command
@@ -85,7 +85,7 @@ async def reply_keyboard_handler(
             )
             await message.answer(
                 LIMIT_EXPIRED_MESSAGE,
-                reply_markup=main_keyboard(),
+                reply_markup=profile_payment_keyboard(),
             )
             return
 
@@ -104,7 +104,7 @@ async def reply_keyboard_handler(
                 settings,
                 session_factory,
             ),
-            reply_markup=main_keyboard(),
+            reply_markup=profile_payment_keyboard(),
         )
     elif message.text == MENU_HISTORY and message.from_user is not None:
         track_event(session_factory, "history_opened", message.from_user, settings=settings)

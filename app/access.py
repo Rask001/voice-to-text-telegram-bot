@@ -20,14 +20,12 @@ from app.tariffs import (
 
 TRIAL_EXPIRED_MESSAGE = (
     "Пробный период закончился. Чтобы продолжить пользоваться ботом, "
-    "оформите подписку.\n\n"
-    "Скоро здесь появится оплата через Telegram Stars ⭐"
+    "оформите подписку."
 )
 
 LIMIT_EXPIRED_MESSAGE = (
     "❌ Ваш лимит закончился.\n\n"
-    "Чтобы продолжить пользоваться ботом, оформите подписку.\n\n"
-    "Скоро здесь появится оплата через Telegram Stars ⭐"
+    "Чтобы продолжить пользоваться ботом, оформите подписку."
 )
 
 
@@ -51,6 +49,7 @@ class AccessStatus:
     trial_days_left: int | None
     max_voice_seconds: int | None
     total_saved_seconds: int
+    tariff_expires_at: datetime | None
     denial_reason: str | None = None
     denial_code: str | None = None
 
@@ -171,11 +170,22 @@ def _resolve_tariff_type(user_settings, user_id: int, username: str | None, sett
         return OWNER
     if user_id in settings.unlimited_user_ids or bool(user_settings.is_unlimited):
         return BROTHER
-    if bool(user_settings.is_premium):
+    if stored_tariff in {STANDARD, PREMIUM} and _paid_tariff_expired(user_settings):
+        user_settings.tariff_type = FREE
+        user_settings.is_premium = False
+        return FREE
+    if bool(user_settings.is_premium) and not _paid_tariff_expired(user_settings):
         return PREMIUM
     if stored_tariff in {STANDARD, PREMIUM, BROTHER}:
         return stored_tariff
     return FREE
+
+
+def _paid_tariff_expired(user_settings) -> bool:
+    expires_at = getattr(user_settings, "tariff_expires_at", None)
+    if expires_at is None:
+        return False
+    return datetime.now() >= expires_at
 
 
 def _reset_period_counters(user_settings, now: datetime) -> None:
@@ -259,6 +269,7 @@ def _build_access_status(
         trial_days_left=trial_days_left,
         max_voice_seconds=plan.max_voice_seconds,
         total_saved_seconds=user_settings.total_saved_seconds or 0,
+        tariff_expires_at=getattr(user_settings, "tariff_expires_at", None),
         denial_reason=denial_reason,
         denial_code=denial_code,
     )

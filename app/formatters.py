@@ -218,6 +218,11 @@ def format_profile(
     )
     username_text = f"@{username}" if username else "не указан"
     reset_text = f"{access_status.reset_date.isoformat()} 00:00"
+    expires_text = (
+        ""
+        if access_status.tariff_expires_at is None
+        else f"\n\nТариф активен до:\n<b>{format_datetime(access_status.tariff_expires_at)}</b>"
+    )
     return (
         "👤 <b>Профиль</b>\n\n"
         f"Имя: <b>{escape(full_name)}</b>\n"
@@ -235,6 +240,7 @@ def format_profile(
         f"⏱ Сэкономлено времени:\n<b>{format_duration(access_status.total_saved_seconds)}</b>\n\n"
         f"Осталось дней пробного периода:\n<b>{trial_days}</b>\n\n"
         f"Сброс лимита:\n<b>{reset_text}</b>"
+        f"{expires_text}"
     )
 
 
