@@ -1,6 +1,6 @@
 # Telegram Voice Summary Bot MVP
 
-MVP Telegram-бота на Python 3.12 и aiogram 3: принимает voice messages, скачивает аудио из Telegram, расшифровывает через OpenAI, делает краткое содержание, выделяет задачи и важные пункты, хранит историю и тарифные лимиты в SQLite.
+MVP Telegram-бота на Python 3.12 и aiogram 3: принимает voice messages, скачивает аудио из Telegram, расшифровывает аудио через OpenAI, анализирует текст через DeepSeek, выделяет задачи и важные пункты, хранит историю и тарифные лимиты в SQLite.
 
 ## Что уже есть
 
@@ -11,14 +11,15 @@ MVP Telegram-бота на Python 3.12 и aiogram 3: принимает voice me
 - `/reminders` для списка активных напоминаний
 - `/remind` для ручного создания напоминания
 - `/settings` для выбора формата ответа
-- `/health` для быстрой проверки бота, SQLite, ffmpeg и API key
+- `/health` для быстрой проверки бота, SQLite, ffmpeg, OpenAI key и DeepSeek key
 - owner-only админские команды: стартовый текст, тарифы, пользователи, статистика, health, backup и broadcast
 - постоянное нижнее меню Telegram через Reply Keyboard
 - прием Telegram `voice` messages
 - скачивание аудио во временный файл
 - конвертация Telegram OGG/Opus в MP3 через `ffmpeg`
 - transcription через OpenAI Audio Transcriptions
-- summary/action items/important points через OpenAI Responses API
+- summary/action items/important points через DeepSeek text analysis
+- локальный расчёт индекса воды, многословности, типа голосового, оценки и сэкономленного времени
 - SQLite + SQLAlchemy
 - тарифная система: Owner, По-братски от Тоши, Free, Standard, Premium
 - дневные, месячные и trial-лимиты по минутам
@@ -51,7 +52,11 @@ app/
   tasks.py           # нормализация задач и priority
   main.py            # точка входа
   models.py          # таблицы SQLite
-  openai_service.py  # OpenAI transcription + analysis
+  ai_clients/        # OpenAI transcription client и DeepSeek analysis client
+  transcription_service.py # audio -> plain text через OpenAI
+  text_analysis_service.py # transcript -> structured JSON через DeepSeek
+  voice_metrics_service.py # локальный расчёт метрик голосового
+  openai_service.py  # совместимый alias только для OpenAI transcription
   runtime_state.py   # uptime и runtime-флаги
 data/                # SQLite база при локальном/Docker запуске
 tests/               # минимальные unit-тесты
@@ -83,6 +88,7 @@ cp .env.example .env
 ```env
 TELEGRAM_BOT_TOKEN=...
 OPENAI_API_KEY=...
+DEEPSEEK_API_KEY=...
 ```
 
 4. Установите зависимости и запустите:
@@ -120,6 +126,9 @@ Env-файлы:
 APP_ENV=local
 TELEGRAM_BOT_TOKEN=123456:test_bot_token
 OPENAI_API_KEY=sk-your-key
+DEEPSEEK_API_KEY=deepseek-your-key
+DEEPSEEK_MODEL=deepseek-chat
+DEEPSEEK_BASE_URL=https://api.deepseek.com
 DATABASE_URL=sqlite+aiosqlite:///./bot_local_test.db
 DEFAULT_RESPONSE_MODE=short
 DEFAULT_TIMEZONE=Russia/Moscow
@@ -177,8 +186,10 @@ ENV_FILE=.env.production python -m app.main
 
 ```env
 APP_ENV=production
-OPENAI_TRANSCRIBE_MODEL=gpt-4o-mini-transcribe
-OPENAI_TEXT_MODEL=gpt-5-mini
+OPENAI_TRANSCRIPTION_MODEL=gpt-4o-mini-transcribe
+DEEPSEEK_API_KEY=
+DEEPSEEK_MODEL=deepseek-chat
+DEEPSEEK_BASE_URL=https://api.deepseek.com
 DATABASE_URL=sqlite:///data/bot.db
 DAILY_VOICE_LIMIT=5
 MAX_VOICE_SECONDS=600
@@ -188,6 +199,32 @@ UNLIMITED_USER_IDS=
 ```
 
 `MAX_VOICE_SECONDS=600` означает 10 минут. Telegram voice messages обычно приходят как OGG/Opus, поэтому бот перед отправкой в OpenAI конвертирует файл в MP3 через `ffmpeg`.
+
+## AI Pipeline
+
+```text
+voice message
+↓
+download + ffmpeg
+↓
+OpenAI transcription only
+↓
+plain text transcript
+↓
+DeepSeek structured JSON
+↓
+local voice metrics
+↓
+SQLite cache + Telegram response
+```
+
+OpenAI получает только аудио и простой prompt на дословную расшифровку. Он не получает prompt для summary, задач, details, meme или численных метрик.
+
+DeepSeek получает только готовый текст расшифровки и возвращает JSON: `title`, `summary`, `tasks`, `details`, `important_points`, `voice_analysis.memorable_quote`, `voice_analysis.verdict`, `voice_analysis.meme`.
+
+Локальный сервер сам считает `duration_seconds`, `meaningful_duration_seconds`, `water_percent`, `wordiness_score`, `quality_score`, уровни воды/типа, `rare_title`, `saved_seconds` и `total_saved_seconds`.
+
+Если DeepSeek временно недоступен, бот сохраняет полный текст в историю и показывает пользователю: `Текст расшифрован, но анализ временно недоступен. Попробуйте позже.`
 
 `DEFAULT_RESPONSE_MODE` задаёт формат ответа для пользователей без личной настройки:
 

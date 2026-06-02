@@ -10,9 +10,12 @@ from aiogram.client.default import DefaultBotProperties
 from app.config import get_settings
 from app.db import create_session_factory
 from app.handlers import router
-from app.openai_service import OpenAIService
+from app.ai_clients.deepseek_client import DeepSeekClient
+from app.ai_clients.openai_client import OpenAITranscriptionClient
 from app.reminder_scheduler import run_reminder_scheduler
 from app.runtime_state import mark_reminder_scheduler_started
+from app.text_analysis_service import TextAnalysisService
+from app.transcription_service import TranscriptionService
 
 
 async def main() -> None:
@@ -29,7 +32,10 @@ async def main() -> None:
     dp["settings"] = settings
     session_factory = create_session_factory(settings)
     dp["session_factory"] = session_factory
-    dp["openai_service"] = OpenAIService(settings)
+    dp["transcription_service"] = TranscriptionService(
+        OpenAITranscriptionClient(settings)
+    )
+    dp["text_analysis_service"] = TextAnalysisService(DeepSeekClient(settings))
 
     dp.include_router(router)
     mark_reminder_scheduler_started()

@@ -1,6 +1,6 @@
 # Architecture
 
-Проект — polling Telegram bot на aiogram 3. Telegram orchestration разделен на пакет `app/handlers/`, где каждый модуль отвечает за свою область: start/help/profile/history/voice/callbacks/menu/admin/settings/system/fallbacks. Доменные правила вынесены в `app/access_service.py`, `app/access.py`, `app/tariffs.py`, `app/tasks.py`, `app/formatters.py`, `app/analytics_service.py`, `app/openai_service.py`, `app/models.py`.
+Проект — polling Telegram bot на aiogram 3. Telegram orchestration разделен на пакет `app/handlers/`, где каждый модуль отвечает за свою область: start/help/profile/history/voice/callbacks/menu/admin/settings/system/fallbacks. Доменные правила вынесены в `app/access_service.py`, `app/access.py`, `app/tariffs.py`, `app/tasks.py`, `app/formatters.py`, `app/analytics_service.py`, `app/transcription_service.py`, `app/text_analysis_service.py`, `app/voice_metrics_service.py`, `app/models.py`.
 
 ## High-Level Схема
 
@@ -25,7 +25,9 @@ get_settings()
 ↓
 create_session_factory()
 ↓
-OpenAIService(settings)
+TranscriptionService(OpenAITranscriptionClient)
+↓
+TextAnalysisService(DeepSeekClient)
 ↓
 dp.include_router(router)
 ↓
@@ -60,7 +62,7 @@ sqlite+aiosqlite:///./bot_local_test.db
 
 `start_local.sh` защищает от случайного запуска production token локально: сравнивает токен с `.env`, требует базу `bot_local_test.db`, пишет PID в `data/local_bot.pid` и логи в `logs/local.out.log` / `logs/local.err.log`.
 
-На старте `app/main.py` логирует `APP_ENV`, `ENV_FILE`, безопасный `DATABASE_URL` и только последние 4 символа Telegram token. OpenAI key и полный Telegram token не логируются.
+На старте `app/main.py` логирует `APP_ENV`, `ENV_FILE`, безопасный `DATABASE_URL` и только последние 4 символа Telegram token. OpenAI key, DeepSeek key и полный Telegram token не логируются.
 
 Текущий SQLAlchemy engine синхронный. Для удобства локального `.env.local` `app/db.py` принимает `sqlite+aiosqlite:///...` и внутри приводит его к `sqlite:///...`.
 
@@ -81,11 +83,13 @@ download Telegram file
 ↓
 ffmpeg OGG/Opus -> MP3
 ↓
-OpenAI transcription
+OpenAI transcription only
 ↓
-OpenAI analysis JSON
+plain text transcript
 ↓
-normalize voice_analysis
+DeepSeek structured JSON
+↓
+local voice metrics calculation
 ↓
 record_voice_usage()
 ↓
@@ -100,48 +104,59 @@ attach fresh_* inline buttons
 
 Подробности:
 
-- лимиты проверяются до скачивания аудио, ffmpeg и OpenAI;
+- лимиты проверяются до скачивания аудио, ffmpeg, OpenAI и DeepSeek;
 - тексты прогресса выбираются один раз на voice из `app/progress_messages.py`; отдельный progress updater редактирует одно статусное сообщение каждые 1.7 секунды, на успехе бот дожидается завершения набора, а при ошибке останавливает updater и показывает ошибку;
 - аудиофайлы сохраняются только во временных файлах и удаляются в `finally`;
-- `OpenAIService.transcribe()` возвращает полный текст;
-- `OpenAIService.analyze()` возвращает `title`, `summary`, `tasks`, `details`, `important_points`, `voice_analysis`;
+- `TranscriptionService.transcribe()` через OpenAI возвращает только полный plain text;
+- `TextAnalysisService.analyze()` через DeepSeek возвращает `title`, `summary`, `tasks`, `details`, `important_points`, текстовые `voice_analysis` поля;
+- `voice_metrics_service.build_voice_analysis()` локально считает численные метрики анализа;
 - задачи сохраняются в `VoiceNote.action_items` как JSON-массив `{text, priority}`;
 - мемный анализ сохраняется в `VoiceNote.voice_analysis_json`;
 - `saved_seconds` прибавляется к `UserSettings.total_saved_seconds` и показывается в `/profile`;
 - старые newline-задачи читаются как `priority=false`;
 - ответ по умолчанию строит `format_short()`: summary + tasks.
 
-## Поток OpenAI
+## AI Pipeline
 
 ```text
 MP3 file
 ↓
-OpenAIService.transcribe()
+OpenAITranscriptionClient
 ↓
 transcript text
 ↓
-OpenAIService.analyze()
+DeepSeekClient
 ↓
 JSON extraction
 ↓
 normalize_tasks()
 ↓
-normalize_voice_analysis()
+build_voice_analysis()
 ↓
 handlers save normalized data
 ```
 
-`voice_analysis` создается в том же OpenAI-запросе, что summary/tasks/details. Отдельного запроса к OpenAI нет. Структура включает длительность, содержательную часть, индекс воды, многословность, оценку, уровни воды/типа/вердикта, цитату, вердикт, мем, редкий титул и `saved_seconds`.
+OpenAI используется только как speech-to-text. Он получает MP3 и простой prompt: дословно расшифровать текст без структурирования, сокращения, выводов или интерпретации. OpenAI не получает prompt для summary, tasks, details, meme или численных метрик.
 
-`normalize_voice_analysis()` не доверяет всем уровням OpenAI напрямую: `water_level` пересчитывается из `water_percent`, а `voice_type_level` — из `wordiness_score` с мягким учетом воды и длительности. Это убирает противоречия вроде низкой многословности с типом `Подкастер`.
+DeepSeek используется только для анализа готового текста. Он получает plain text transcript и возвращает JSON с `title`, `summary`, `tasks`, `details`, `important_points`, `voice_analysis.memorable_quote`, `voice_analysis.verdict`, `voice_analysis.meme`.
 
-Prompt требует жёсткий сарказм, циничный короткий мемный verdict/meme без канцелярита и без мягкой “бережной” подачи. Мем шутит про формат, длину, воду, драматургию, фразы вроде `короче`/`я быстро` или контекст, но бьёт по формату сообщения, а не по человеку. Запрещены мат, травля, угрозы, личностные оскорбления и чувствительные признаки.
+Локальный сервер считает технические и мемные числа без AI: `duration_seconds`, `meaningful_duration_seconds`, `water_percent`, `wordiness_score`, `quality_score`, `voice_type_level`, `water_level`, `verdict_level`, `rare_title`, `saved_seconds` и общий `total_saved_seconds`.
 
-OpenAI ошибки:
+`normalize_voice_analysis()` остается совместимым слоем: он приводит локально рассчитанные метрики к безопасной структуре, пересчитывает `water_level` из `water_percent`, `voice_type_level` из `wordiness_score` с учетом воды и длительности, выбирает редкие титулы и санитизирует токсичный meme.
+
+DeepSeek prompt требует жёсткий сарказм, циничный короткий мемный verdict/meme без канцелярита и без мягкой “бережной” подачи. Мем шутит про формат, длину, воду, драматургию, фразы вроде `короче`/`я быстро` или контекст, но бьёт по формату сообщения, а не по человеку. Запрещены мат, травля, угрозы, личностные оскорбления и чувствительные признаки.
+
+OpenAI transcription ошибки:
 
 - `insufficient_quota` превращается в `OpenAIInsufficientQuotaError` и не ретраится бесконечно;
 - обычный `RateLimitError` получает exponential backoff с ограниченным числом попыток;
-- invalid JSON логируется, а raw text используется как summary fallback.
+- техническая ошибка логируется и показывает пользователю понятное сообщение.
+
+DeepSeek ошибки:
+
+- если DeepSeek недоступен или возвращает invalid JSON, уже полученная расшифровка сохраняется в `VoiceNote.transcript`;
+- пользователь получает `Текст расшифрован, но анализ временно недоступен. Попробуйте позже.`;
+- история и кнопка полного текста продолжают работать с сохраненным transcript.
 
 ## Поток SQLite
 
@@ -529,7 +544,7 @@ access.py resolves plan through tariffs.py
 Service actions:
 
 - `/admin_users` читает `user_settings` и последнюю активность из `analytics_events`/`voice_notes`;
-- `/admin_health` проверяет SQLite, ffmpeg, OpenAI key, scheduler flag, pending/failed reminders, uptime, Python и диск;
+- `/admin_health` проверяет SQLite, ffmpeg, OpenAI key, DeepSeek key, scheduler flag, pending/failed reminders, uptime, Python и диск;
 - `/admin_backup` копирует SQLite в `backups/bot_backup_YYYY-MM-DD_HH-MM-SS.db`;
 - `/admin_broadcast` проходит FSM: текст → подтверждение inline-кнопкой → отправка всем `user_settings.telegram_user_id` с небольшой паузой.
 

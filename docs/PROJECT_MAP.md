@@ -27,7 +27,7 @@
 
 ### `.env.production`
 
-- Назначение: production env с боевым Telegram token, OpenAI key и production `DATABASE_URL`.
+- Назначение: production env с боевым Telegram token, OpenAI key, DeepSeek key и production `DATABASE_URL`.
 - Основные классы: нет.
 - Основные функции: нет.
 - Связи: загружается через `ENV_FILE=.env.production`; не коммитится.
@@ -119,12 +119,12 @@
 - Назначение: точка входа приложения.
 - Основные классы: нет.
 - Основные функции:
-  - `main()` — настраивает логирование, читает настройки, создает `Bot`, `Dispatcher`, session factory, `OpenAIService`, запускает reminder scheduler, регистрирует router и запускает polling.
+  - `main()` — настраивает логирование, читает настройки, создает `Bot`, `Dispatcher`, session factory, `TranscriptionService`, `TextAnalysisService`, запускает reminder scheduler, регистрирует router и запускает polling.
 - Связи:
   - читает `get_settings()` из `app/config.py`;
   - создает SQLite session factory через `app/db.py`;
   - подключает aggregate router из `app/handlers/__init__.py`;
-  - создает `OpenAIService` из `app/openai_service.py`;
+  - создает `TranscriptionService(OpenAITranscriptionClient)` и `TextAnalysisService(DeepSeekClient)`;
   - запускает `run_reminder_scheduler()` из `app/reminder_scheduler.py`;
   - использует aiogram polling, не webhook.
 
@@ -132,14 +132,15 @@
 
 - Назначение: загрузка env-файла через `ENV_FILE` и типизированные настройки.
 - Основные классы:
-  - `Settings` — dataclass с Telegram/OpenAI/SQLite/лимитами/owner настройками, `env_file`, `app_env`, `default_timezone`, `default_reminder_time`.
+  - `Settings` — dataclass с Telegram/OpenAI transcription/DeepSeek/SQLite/лимитами/owner настройками, `env_file`, `app_env`, `default_timezone`, `default_reminder_time`.
 - Основные функции:
   - `get_settings()` — читает `ENV_FILE` или `.env`, валидирует обязательные `TELEGRAM_BOT_TOKEN` и `OPENAI_API_KEY`;
+  - `openai_transcription_model` — compatibility property для нового имени `OPENAI_TRANSCRIPTION_MODEL`;
   - `_infer_app_env()` — определяет `local`/`production` по имени env-файла;
   - `_parse_optional_int()` — парсит `OWNER_TELEGRAM_ID`;
   - `_parse_int_list()` — парсит `UNLIMITED_USER_IDS`.
 - Связи:
-  - используется в `app/main.py`, `app/handlers/`, `app/access.py`, `app/openai_service.py`, `app/db.py`.
+  - используется в `app/main.py`, `app/handlers/`, `app/access.py`, `app/ai_clients/`, `app/db.py`.
 
 ### `app/db.py`
 
@@ -315,7 +316,7 @@
 - Назначение: основной pipeline voice message.
 - Основные функции:
   - `handle_voice()`.
-- Связи: использует `check_user_access()`, `record_voice_usage()`, `OpenAIService`, `VoiceNote`, `format_response()`, `note_keyboard(source="fresh")`, `get_random_progress_pack()` из `app/progress_messages.py`, utils для ffmpeg/download/chunking, `track_event()` для voice analytics.
+- Связи: использует `check_user_access()`, `record_voice_usage()`, `TranscriptionService`, `TextAnalysisService`, `build_voice_analysis()`, `VoiceNote`, `format_response()`, `note_keyboard(source="fresh")`, `get_random_progress_pack()` из `app/progress_messages.py`, utils для ffmpeg/download/chunking, `track_event()` для voice analytics. Если DeepSeek падает после успешной расшифровки, сохраняет transcript в `VoiceNote` и показывает понятную ошибку.
 
 ### `app/handlers/callbacks.py`
 
@@ -370,14 +371,14 @@
   - `VOICE_TYPES` — 10 типов голосового;
   - `RARE_TITLES` — редкие титулы для высокой воды/многословности.
 - Основные функции:
-  - `normalize_voice_analysis()` — приводит OpenAI JSON к безопасной структуре;
+  - `normalize_voice_analysis()` — приводит локально рассчитанные метрики и DeepSeek creative text к безопасной структуре;
   - `fallback_voice_analysis()` — fallback для старых записей без анализа;
   - `serialize_voice_analysis()`;
   - `parse_voice_analysis_json()`;
   - `water_class()`, `voice_type()`;
   - `format_duration()`, `format_compact_duration()`.
 - Связи:
-  - используется в `app/openai_service.py`, `app/formatters.py`, `app/handlers/voice.py`, `app/handlers/callbacks.py`;
+  - используется в `app/voice_metrics_service.py`, `app/formatters.py`, `app/handlers/voice.py`, `app/handlers/callbacks.py`;
   - не вызывает OpenAI и не знает о Telegram.
 
 ### `app/progress_messages.py`
@@ -498,28 +499,94 @@
   - `sort_tasks_for_display()` — priority tasks first, порядок внутри групп сохраняется;
   - `split_stored_list()` — helper для старых строковых списков.
 - Связи:
-  - используется в `app/openai_service.py`, `app/handlers/`, `app/formatters.py`;
+  - используется в `app/text_analysis_service.py`, `app/handlers/`, `app/formatters.py`;
   - обеспечивает обратную совместимость `VoiceNote.action_items`.
+
+### `app/ai_clients/openai_client.py`
+
+- Назначение: низкоуровневый OpenAI client только для speech-to-text.
+- Основные классы:
+  - `OpenAITranscriptionClient`;
+  - `OpenAIInsufficientQuotaError`.
+- Основные данные:
+  - `TRANSCRIPTION_PROMPT` — просит дословную расшифровку без выводов, структурирования и интерпретации.
+- Основные функции:
+  - `OpenAITranscriptionClient.transcribe()` — отправляет MP3 в OpenAI Audio Transcriptions;
+  - `_is_insufficient_quota()` — определяет quota exhaustion;
+  - `_with_rate_limit_retry()` — ограниченный exponential backoff для обычного `RateLimitError`.
+- Связи:
+  - используется в `app/transcription_service.py` и `app/main.py`;
+  - не анализирует текст и не строит JSON.
+
+### `app/ai_clients/deepseek_client.py`
+
+- Назначение: низкоуровневый DeepSeek client для structured text analysis через OpenAI-compatible Chat Completions.
+- Основные классы:
+  - `DeepSeekClient`;
+  - `DeepSeekClientError`.
+- Основные функции:
+  - `DeepSeekClient.analyze_text()` — отправляет system/user prompt и возвращает raw JSON text.
+- Связи:
+  - используется в `app/text_analysis_service.py` и `app/main.py`;
+  - читает `DEEPSEEK_API_KEY`, `DEEPSEEK_MODEL`, `DEEPSEEK_BASE_URL` из `Settings`;
+  - не получает аудиофайлы.
+
+### `app/transcription_service.py`
+
+- Назначение: доменный сервис audio-to-text.
+- Основные классы:
+  - `TranscriptionService`;
+  - `TranscriptionClient` protocol.
+- Основные функции:
+  - `TranscriptionService.transcribe()`.
+- Связи:
+  - оборачивает `OpenAITranscriptionClient`;
+  - вызывается из `app/handlers/voice.py`;
+  - возвращает только plain text transcript.
+
+### `app/text_analysis_service.py`
+
+- Назначение: DeepSeek structured analysis для transcript.
+- Основные классы:
+  - `TextAnalysisService`;
+  - `TextAnalysisError`;
+  - `TextAnalysisResult`;
+  - `VoiceAnalysisText`.
+- Основные функции:
+  - `TextAnalysisService.analyze()` — возвращает `title`, `summary`, `action_items`, `details`, `important_points`, `voice_analysis_text`;
+  - `_analysis_system_prompt()` — prompt для summary/tasks/details/meme;
+  - `_analysis_user_prompt()` — передает transcript;
+  - `_extract_json()`;
+  - `_as_string_list()`.
+- Связи:
+  - использует `normalize_tasks()` из `app/tasks.py`;
+  - вызывается из `app/handlers/voice.py`;
+  - не считает численные voice metrics.
+
+### `app/voice_metrics_service.py`
+
+- Назначение: локальный расчет метрик голосового без AI.
+- Основные функции:
+  - `build_voice_analysis()` — считает meaningful duration, water percent, wordiness, quality, saved seconds и объединяет это с DeepSeek `verdict/meme/quote`;
+  - `_estimate_meaningful_duration_seconds()`;
+  - `_calculate_water_percent()`;
+  - `_calculate_wordiness_score()`;
+  - `_calculate_quality_score()`.
+- Связи:
+  - использует `normalize_voice_analysis()` из `app/voice_analysis.py`;
+  - вызывается из `app/handlers/voice.py`;
+  - не вызывает OpenAI или DeepSeek.
 
 ### `app/openai_service.py`
 
-- Назначение: изоляция вызовов OpenAI API.
+- Назначение: совместимый alias для старых импортов, теперь только OpenAI transcription.
 - Основные классы:
-  - `OpenAIInsufficientQuotaError` — специальная ошибка для `insufficient_quota`;
-  - `OpenAIService` — клиент OpenAI.
+  - `OpenAIService` — subclass `TranscriptionService`, оборачивает `OpenAITranscriptionClient`.
 - Основные функции и методы:
-  - `OpenAIService.transcribe()` — отправляет MP3 в Audio Transcriptions;
-  - `OpenAIService.analyze()` — просит JSON с `title`, `summary`, `tasks`, `details`, `important_points`;
-  - `OpenAIService._with_rate_limit_retry()` — ограниченный exponential backoff для обычных `RateLimitError`;
-  - `_as_string_list()` — normalizer массивов строк;
-  - `_extract_json()` — вытаскивает JSON из текста/markdown fence;
-  - `_is_insufficient_quota()` — определяет quota exhaustion.
+  - `OpenAIService.transcribe()` — унаследованная audio transcription.
 - Связи:
-  - получает `Settings` из `app/config.py`;
-  - использует `normalize_tasks()` из `app/tasks.py`;
-  - использует `normalize_voice_analysis()` из `app/voice_analysis.py`;
-  - вызывается из `app/handlers/voice.py`;
-  - не знает о SQLite и Telegram.
+  - не вызывается из `app/main.py` в новой архитектуре;
+  - не имеет `analyze()` и не содержит text-analysis prompt.
 
 ### `app/access.py`
 
@@ -671,16 +738,31 @@
 - Основные классы:
   - `VoiceAnalysisTests`.
 - Основные проверки:
-  - `voice_analysis` парсится из OpenAI JSON;
+  - `voice_analysis` нормализует сохраненный JSON;
   - meme сохраняется в SQLite;
   - старые записи без анализа не ломаются;
   - `saved_seconds` не бывает меньше 0;
   - `total_saved_seconds` увеличивается;
+  - `build_voice_analysis()` считает метрики локально;
   - formatter выводит анализ;
   - share-блок содержит meme;
   - rare title появляется только при высокой воде/многословности;
-  - prompt содержит запрет на токсичные шутки.
-- Связи: использует `app/voice_analysis.py`, `app/openai_service.py`, `app/formatters.py`, `app/models.py`.
+  - токсичный meme заменяется безопасным fallback.
+- Связи: использует `app/voice_analysis.py`, `app/voice_metrics_service.py`, `app/formatters.py`, `app/models.py`.
+
+### `tests/test_ai_pipeline.py`
+
+- Назначение: unit-тесты разделения AI pipeline.
+- Основные классы:
+  - `AIPipelineTests`.
+- Основные проверки:
+  - `TranscriptionService` возвращает только text;
+  - `TextAnalysisService` отправляет transcript в DeepSeek-compatible client и парсит JSON;
+  - `OpenAIService` больше не имеет `analyze()`;
+  - DeepSeek invalid JSON превращается в `TextAnalysisError`;
+  - `voice_metrics_service` локально считает water и saved seconds;
+  - при падении анализа full text сохраняется в `VoiceNote`.
+- Связи: использует `app/transcription_service.py`, `app/text_analysis_service.py`, `app/voice_metrics_service.py`, `app/handlers/voice.py`.
 
 ### `tests/test_admin_service.py`
 

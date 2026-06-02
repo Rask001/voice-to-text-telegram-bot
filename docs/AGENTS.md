@@ -53,21 +53,28 @@
 - production/deploy flow по умолчанию продолжает читать `.env`;
 - `bot_local_test.db` не должен смешиваться с `data/bot.db`.
 
-### Если нужно изменить OpenAI prompt
+### Если нужно изменить AI pipeline или prompt
 
 Читать:
 
-- `app/openai_service.py`
+- `app/transcription_service.py`
+- `app/text_analysis_service.py`
+- `app/voice_metrics_service.py`
+- `app/ai_clients/openai_client.py`
+- `app/ai_clients/deepseek_client.py`
 - `app/voice_analysis.py`, если меняется мемный анализ;
-- `docs/ARCHITECTURE.md`, раздел OpenAI
+- `docs/ARCHITECTURE.md`, раздел AI Pipeline
 - `docs/FEATURES.md`, разделы OpenAI и задач
 
 Проверить:
 
-- JSON keys, которые ожидают `app/openai_service.py`, `app/tasks.py`, `app/handlers/voice.py`;
+- OpenAI используется только для audio transcription;
+- DeepSeek используется для `summary`, `tasks`, `details`, `important_points`, `verdict`, `meme`, `memorable_quote`;
+- локальные метрики считаются в `app/voice_metrics_service.py`;
+- JSON keys, которые ожидают `app/text_analysis_service.py`, `app/tasks.py`, `app/handlers/voice.py`;
 - fallback на invalid JSON;
 - обратную совместимость `action_items`/`tasks`.
-- `voice_analysis` должен оставаться в том же OpenAI-запросе, без отдельного запроса;
+- `voice_analysis` от DeepSeek содержит только текстовые творческие поля, без численных метрик;
 - prompt для meme должен запрещать мат, унижения и оскорбления личности.
 
 ### Если нужно изменить обработку voice
@@ -79,11 +86,13 @@
 - `app/handlers/utils.py`: `download_voice()`, `convert_to_mp3()`;
 - `app/access_service.py`: `check_user_access()`;
 - `app/access.py`: `record_voice_usage()`;
-- `app/openai_service.py`.
+- `app/transcription_service.py`;
+- `app/text_analysis_service.py`;
+- `app/voice_metrics_service.py`.
 
 Проверить:
 
-- лимит до OpenAI;
+- лимит до скачивания, ffmpeg, OpenAI и DeepSeek;
 - status message;
 - progress pack выбирается один раз на voice, каждый pack должен содержать ровно 8 сообщений;
 - обычные progress packs живут в `ORDINARY_PROGRESS_PACKS`, редкие легендарные — в `LEGENDARY_PROGRESS_PACKS`;
@@ -128,7 +137,8 @@
 Читать:
 
 - `app/voice_analysis.py`;
-- `app/openai_service.py`;
+- `app/text_analysis_service.py`;
+- `app/voice_metrics_service.py`;
 - `app/formatters.py`: `format_voice_analysis()`, `format_share_voice_analysis()`;
 - `app/handlers/voice.py`;
 - `app/handlers/callbacks.py`;
@@ -138,6 +148,9 @@
 Важно:
 
 - не делать отдельный OpenAI-запрос;
+- OpenAI не должен получать prompt для meme/verdict;
+- DeepSeek генерирует только `verdict`, `meme`, `memorable_quote`;
+- `duration`, `water_percent`, `wordiness_score`, `quality_score`, `saved_seconds`, уровни и редкий титул считает локальный `voice_metrics_service`;
 - старые записи без `voice_analysis_json` должны открываться через fallback;
 - history callbacks не должны вызывать OpenAI;
 - `saved_seconds` всегда `max(0, duration - meaningful_duration)`;
@@ -271,7 +284,7 @@
 
 - аналитика пишется только в SQLite;
 - не добавлять внешние сервисы без отдельного решения;
-- не писать transcript, summary, tasks, OpenAI key, Telegram token или другие секреты в `payload_json`;
+- не писать transcript, summary, tasks, OpenAI key, DeepSeek key, Telegram token или другие секреты в `payload_json`;
 - `track_event()` должен оставаться best-effort: ошибка аналитики логируется, но не ломает пользовательский сценарий;
 - новые события документировать в `docs/FEATURES.md` и `docs/ARCHITECTURE.md`.
 - admin stats форматируются в `app/analytics_service.py:format_admin_stats()`;
@@ -316,7 +329,7 @@
 
 Читать:
 
-- `app/openai_service.py`: prompt и OpenAI JSON mapping;
+- `app/text_analysis_service.py`: DeepSeek prompt и JSON mapping;
 - `app/tasks.py`: `normalize_tasks()`, `serialize_tasks()`, `parse_stored_tasks()`, `sort_tasks_for_display()`;
 - `app/formatters.py`: `format_tasks()`, `format_numbered_list()`;
 - `app/handlers/voice.py`: сохранение `VoiceNote.action_items`;
@@ -391,7 +404,8 @@
 
 Читать:
 
-- `app/openai_service.py`;
+- `app/ai_clients/openai_client.py`;
+- `app/transcription_service.py`;
 - `app/handlers/voice.py`: `except OpenAIInsufficientQuotaError`, `except RateLimitError`, `except OpenAIError`.
 
 Проверить:
@@ -399,6 +413,20 @@
 - insufficient_quota не ретраится бесконечно;
 - обычный RateLimitError ретраится ограниченно;
 - техническая ошибка логируется.
+
+### Если нужно изменить ошибки DeepSeek
+
+Читать:
+
+- `app/ai_clients/deepseek_client.py`;
+- `app/text_analysis_service.py`;
+- `app/handlers/voice.py`: fallback после успешной transcription.
+
+Важно:
+
+- если DeepSeek недоступен, полный текст должен сохраняться в `VoiceNote.transcript`;
+- пользователь получает `Текст расшифрован, но анализ временно недоступен. Попробуйте позже.`;
+- OpenAI transcription не повторяется при нажатии inline-кнопок или открытии истории.
 
 ### Если нужно изменить `/health`
 
@@ -455,7 +483,7 @@
 - callback data;
 - SQLite schema;
 - тарифы и лимиты;
-- OpenAI JSON format;
+- AI JSON format;
 - task normalization format;
 - formatter ownership;
 - user-facing команды;

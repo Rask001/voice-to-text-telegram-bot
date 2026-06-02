@@ -33,7 +33,7 @@
 
 Примечание: `action_items` для новых записей хранит JSON-массив задач `{text, priority}`. Старые записи могут хранить строки через переносы.
 
-Примечание: `voice_analysis_json` хранит JSON с мемным анализом голосового: `duration_seconds`, `meaningful_duration_seconds`, `water_percent`, `wordiness_score`, `quality_score`, `voice_type_level`, `water_level`, `verdict_level`, `verdict`, `memorable_quote`, `meme`, `rare_title`, `saved_seconds`.
+Примечание: `voice_analysis_json` хранит JSON с мемным анализом голосового: `duration_seconds`, `meaningful_duration_seconds`, `water_percent`, `wordiness_score`, `quality_score`, `voice_type_level`, `water_level`, `verdict_level`, `verdict`, `memorable_quote`, `meme`, `rare_title`, `saved_seconds`. Численные поля рассчитываются локально в `app/voice_metrics_service.py`; DeepSeek генерирует только текстовые `verdict`, `meme`, `memorable_quote`.
 
 ### `user_settings`
 

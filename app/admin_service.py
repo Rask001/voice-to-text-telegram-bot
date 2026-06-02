@@ -264,6 +264,7 @@ def format_admin_health(session_factory: sessionmaker[Session], settings: Settin
         f"{'OK' if db_ok else 'FAIL'} SQLite: {escape(db_detail)}",
         f"{'OK' if ffmpeg_path else 'FAIL'} ffmpeg: {escape(ffmpeg_path or 'not found')}",
         f"{'OK' if settings.openai_api_key else 'FAIL'} OpenAI key: configured",
+        f"{'OK' if settings.deepseek_api_key else 'FAIL'} DeepSeek key: configured",
         f"{'OK' if runtime_state.REMINDER_SCHEDULER_STARTED else 'FAIL'} scheduler: {'running' if runtime_state.REMINDER_SCHEDULER_STARTED else 'not started'}",
         f"Pending reminders: <b>{pending}</b>",
         f"Failed reminders: <b>{failed}</b>",

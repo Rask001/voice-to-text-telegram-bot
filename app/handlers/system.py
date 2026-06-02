@@ -24,6 +24,7 @@ async def health(
         ("database", *_check_database(session_factory)),
         ("ffmpeg", *_check_ffmpeg()),
         ("openai_api_key", bool(settings.openai_api_key), "configured"),
+        ("deepseek_api_key", bool(settings.deepseek_api_key), "configured"),
     ]
 
     lines = ["<b>Health</b>"]

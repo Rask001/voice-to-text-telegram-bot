@@ -28,7 +28,6 @@ from app.handlers.utils import (
     send_text_chunks,
 )
 from app.models import UserSettings, VoiceNote
-from app.openai_service import OpenAIInsufficientQuotaError, OpenAIService
 from app.preferences import get_response_mode
 from app.progress_messages import (
     PROGRESS_UPDATE_INTERVAL_SECONDS,
@@ -36,7 +35,10 @@ from app.progress_messages import (
     get_random_progress_pack,
 )
 from app.tasks import normalize_tasks, serialize_tasks
-from app.voice_analysis import serialize_voice_analysis
+from app.text_analysis_service import TextAnalysisError, TextAnalysisService
+from app.transcription_service import OpenAIInsufficientQuotaError, TranscriptionService
+from app.voice_analysis import fallback_voice_analysis, serialize_voice_analysis
+from app.voice_metrics_service import build_voice_analysis
 
 
 router = Router()
@@ -52,7 +54,8 @@ async def handle_voice(
     bot: Bot,
     settings: Settings,
     session_factory: sessionmaker[Session],
-    openai_service: OpenAIService,
+    transcription_service: TranscriptionService,
+    text_analysis_service: TextAnalysisService,
 ) -> None:
     if message.from_user is None or message.voice is None:
         return
@@ -136,7 +139,10 @@ async def handle_voice(
         raw_audio_path = await download_voice(bot, message.voice.file_id)
         mp3_audio_path = await asyncio.to_thread(convert_to_mp3, raw_audio_path)
 
-        transcript = await asyncio.to_thread(openai_service.transcribe, mp3_audio_path)
+        transcript = await asyncio.to_thread(
+            transcription_service.transcribe,
+            mp3_audio_path,
+        )
         if not transcript:
             await _stop_progress_updates(progress_task)
             track_event(
@@ -165,12 +171,51 @@ async def handle_voice(
             tariff_type=current_tariff_type,
         )
 
-        analysis = await asyncio.to_thread(
-            openai_service.analyze,
-            transcript,
-            duration_seconds,
-        )
-        voice_analysis = analysis["voice_analysis"]
+        try:
+            analysis = await asyncio.to_thread(text_analysis_service.analyze, transcript)
+        except TextAnalysisError as exc:
+            await _stop_progress_updates(progress_task)
+            note_id = _save_transcription_without_analysis(
+                session_factory=session_factory,
+                user_id=user_id,
+                username=message.from_user.username,
+                settings=settings,
+                telegram_file_id=message.voice.file_id,
+                duration_seconds=duration_seconds,
+                transcript=transcript,
+            )
+            _track_voice_failure(
+                session_factory,
+                message,
+                settings,
+                current_tariff_type,
+                duration_seconds,
+                "deepseek_analysis_error",
+                str(exc),
+            )
+            status_ref["message"] = await safe_edit(
+                status_ref["message"],
+                "Текст расшифрован, но анализ временно недоступен. "
+                "Попробуйте позже.",
+                reply_markup=note_keyboard(note_id, source="fresh"),
+            )
+            logger.exception("DeepSeek text analysis failed")
+            return
+
+        try:
+            voice_analysis = build_voice_analysis(
+                transcript=transcript,
+                duration_seconds=duration_seconds,
+                summary=str(analysis["summary"]),
+                tasks=analysis["action_items"],
+                details=str(analysis.get("details", "")),
+                important_points=analysis["important_points"],
+                voice_analysis_text=analysis.get("voice_analysis_text"),
+            )
+        except Exception:
+            logger.exception("Local voice metrics calculation failed")
+            voice_analysis = fallback_voice_analysis(duration_seconds)
+        analysis["voice_analysis"] = voice_analysis
 
         with session_factory() as session:
             record_voice_usage(
@@ -378,3 +423,42 @@ def _track_voice_failure(
         settings=settings,
         tariff_type=tariff_type or None,
     )
+
+
+def _save_transcription_without_analysis(
+    *,
+    session_factory: sessionmaker[Session],
+    user_id: int,
+    username: str | None,
+    settings: Settings,
+    telegram_file_id: str,
+    duration_seconds: int,
+    transcript: str,
+) -> int:
+    with session_factory() as session:
+        record_voice_usage(
+            session,
+            user_id,
+            username,
+            settings,
+            duration_seconds,
+        )
+        note = VoiceNote(
+            telegram_user_id=user_id,
+            telegram_file_id=telegram_file_id,
+            title=clean_title("", note_date=date.today()),
+            duration_seconds=duration_seconds,
+            transcript=transcript,
+            summary="Анализ временно недоступен.",
+            action_items=serialize_tasks([]),
+            details="",
+            important_points="",
+            voice_analysis_json=serialize_voice_analysis(
+                fallback_voice_analysis(duration_seconds)
+            ),
+        )
+        session.add(note)
+        session.flush()
+        note_id = note.id
+        session.commit()
+        return note_id

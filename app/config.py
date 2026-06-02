@@ -13,7 +13,9 @@ class Settings:
     app_env: str = "production"
     database_url: str = "sqlite:///data/bot.db"
     openai_transcribe_model: str = "gpt-4o-mini-transcribe"
-    openai_text_model: str = "gpt-5-mini"
+    deepseek_api_key: str = ""
+    deepseek_model: str = "deepseek-chat"
+    deepseek_base_url: str = "https://api.deepseek.com"
     daily_voice_limit: int = 5
     max_voice_seconds: int = 900
     default_response_mode: str = "short"
@@ -21,6 +23,10 @@ class Settings:
     default_reminder_time: str = "10:00"
     owner_telegram_id: int | None = None
     unlimited_user_ids: tuple[int, ...] = ()
+
+    @property
+    def openai_transcription_model(self) -> str:
+        return self.openai_transcribe_model
 
 
 def get_settings() -> Settings:
@@ -42,9 +48,16 @@ def get_settings() -> Settings:
         app_env=os.getenv("APP_ENV", _infer_app_env(env_file)).strip().lower(),
         database_url=os.getenv("DATABASE_URL", "sqlite:///data/bot.db"),
         openai_transcribe_model=os.getenv(
-            "OPENAI_TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe"
-        ),
-        openai_text_model=os.getenv("OPENAI_TEXT_MODEL", "gpt-5-mini"),
+            "OPENAI_TRANSCRIPTION_MODEL",
+            "gpt-4o-mini-transcribe",
+        ).strip(),
+        deepseek_api_key=os.getenv("DEEPSEEK_API_KEY", "").strip(),
+        deepseek_model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat").strip()
+        or "deepseek-chat",
+        deepseek_base_url=os.getenv(
+            "DEEPSEEK_BASE_URL",
+            "https://api.deepseek.com",
+        ).strip(),
         daily_voice_limit=int(os.getenv("DAILY_VOICE_LIMIT", "5")),
         max_voice_seconds=int(os.getenv("MAX_VOICE_SECONDS", "900")),
         default_response_mode=os.getenv("DEFAULT_RESPONSE_MODE", "short").strip().lower(),

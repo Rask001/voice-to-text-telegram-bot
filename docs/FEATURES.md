@@ -120,7 +120,11 @@
 - `app/handlers/utils.py`
 - `app/access_service.py`
 - `app/access.py`
-- `app/openai_service.py`
+- `app/transcription_service.py`
+- `app/text_analysis_service.py`
+- `app/voice_metrics_service.py`
+- `app/ai_clients/openai_client.py`
+- `app/ai_clients/deepseek_client.py`
 - `app/models.py`
 
 Ключевые функции:
@@ -129,8 +133,9 @@
 - `download_voice()`
 - `convert_to_mp3()`
 - `check_user_access()`
-- `OpenAIService.transcribe()`
-- `OpenAIService.analyze()`
+- `TranscriptionService.transcribe()`
+- `TextAnalysisService.analyze()`
+- `build_voice_analysis()`
 
 ## Напоминания
 
@@ -239,34 +244,51 @@ Callback data:
 - при ошибке updater останавливается и статус заменяется понятной ошибкой;
 - OpenAI не используется для progress messages.
 
-## OpenAI Transcription
+## OpenAI Transcription Only
 
-Описание: MP3 после ffmpeg отправляется в OpenAI Audio Transcriptions.
+Описание: MP3 после ffmpeg отправляется в OpenAI Audio Transcriptions. OpenAI возвращает только дословный plain text transcript.
 
 Основные файлы:
 
-- `app/openai_service.py`
+- `app/ai_clients/openai_client.py`
+- `app/transcription_service.py`
+- `app/handlers/voice.py`
+
+Ключевые функции:
+
+- `OpenAITranscriptionClient.transcribe()`
+- `TranscriptionService.transcribe()`
+
+Правила:
+
+- OpenAI не получает prompt для summary, details, tasks, meme или voice metrics;
+- transcription prompt просит дословную расшифровку без интерпретации, сокращения и структурирования;
+- `insufficient_quota` и обычные `RateLimitError` обрабатываются как раньше.
+
+## DeepSeek Summary, Details, Tasks
+
+Описание: transcript анализируется DeepSeek, ожидается structured JSON для UI.
+
+Основные файлы:
+
+- `app/ai_clients/deepseek_client.py`
+- `app/text_analysis_service.py`
 - `app/tasks.py`
 - `app/handlers/voice.py`
 
 Ключевые функции:
 
-- `OpenAIService.transcribe()`
-
-## OpenAI Summary, Details, Tasks
-
-Описание: transcript анализируется OpenAI Responses API, ожидается JSON.
-
-Основные файлы:
-
-- `app/openai_service.py`
-
-Ключевые функции:
-
-- `OpenAIService.analyze()`
+- `DeepSeekClient.analyze_text()`
+- `TextAnalysisService.analyze()`
 - `_extract_json()`
 - `_as_string_list()`
 - `normalize_tasks()`
+
+Fallback:
+
+- если DeepSeek недоступен или вернул invalid JSON, бот сохраняет полный transcript в `VoiceNote`;
+- пользователь видит `Текст расшифрован, но анализ временно недоступен. Попробуйте позже.`;
+- история и `📄 Полный текст` работают с сохраненной расшифровкой.
 
 ## Мемный Анализ Голосового
 
@@ -274,7 +296,8 @@ Callback data:
 
 Основные файлы:
 
-- `app/openai_service.py`
+- `app/text_analysis_service.py`
+- `app/voice_metrics_service.py`
 - `app/voice_analysis.py`
 - `app/formatters.py`
 - `app/handlers/voice.py`
@@ -284,6 +307,7 @@ Callback data:
 
 Ключевые функции:
 
+- `build_voice_analysis()`
 - `normalize_voice_analysis()`
 - `serialize_voice_analysis()`
 - `parse_voice_analysis_json()`
@@ -304,7 +328,9 @@ Callback data:
 Правила:
 
 - отдельный OpenAI-запрос не делается;
-- meme генерируется внутри текущего JSON анализа;
+- OpenAI вообще не генерирует meme/verdict;
+- DeepSeek генерирует только текстовые творческие поля `memorable_quote`, `verdict`, `meme`;
+- локальный сервер считает длительность, содержательную часть, индекс воды, многословность, тип, оценку, `saved_seconds` и rare title;
 - мем должен быть коротким, жёстко саркастичным, циничным и пересылаемым;
 - можно высмеивать длину, воду, драматургию, формат и фразы вроде `короче`, но нельзя переходить на личность автора;
 - запрещены мат, угрозы, травля, унижения, оскорбления личности и чувствительные признаки;
@@ -313,7 +339,7 @@ Callback data:
 - `water_level` нормализуется из `water_percent`, чтобы класс воды не конфликтовал с индексом воды;
 - редкие титулы появляются только при `wordiness_score >= 9.5` или `water_percent >= 90`;
 - старые записи без `voice_analysis_json` открываются через fallback без ошибки;
-- history callbacks берут анализ только из SQLite и не вызывают OpenAI.
+- history callbacks берут анализ только из SQLite и не вызывают OpenAI или DeepSeek.
 
 ## Приоритетные Задачи
 
@@ -321,14 +347,14 @@ Callback data:
 
 Основные файлы:
 
-- `app/openai_service.py`
+- `app/text_analysis_service.py`
 - `app/tasks.py`
 - `app/formatters.py`
 - `app/models.py`
 
 Ключевые функции:
 
-- `OpenAIService.analyze()`
+- `TextAnalysisService.analyze()`
 - `normalize_tasks()`
 - `serialize_tasks()`
 - `parse_stored_tasks()`
@@ -685,7 +711,7 @@ Callback data:
 
 ## Health Check
 
-Описание: `/health` проверяет bot, SQLite, ffmpeg, OPENAI_API_KEY без дорогого OpenAI-запроса.
+Описание: `/health` проверяет bot, SQLite, ffmpeg, OPENAI_API_KEY и DEEPSEEK_API_KEY без дорогих AI-запросов.
 
 Основные файлы:
 
@@ -786,7 +812,7 @@ Runtime:
 Основные файлы:
 
 - `app/tasks.py`
-- `app/openai_service.py`
+- `app/text_analysis_service.py`
 - `app/formatters.py`
 - `app/handlers/voice.py`
 - `app/handlers/callbacks.py`

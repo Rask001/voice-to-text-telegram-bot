@@ -1,14 +1,11 @@
-import json
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 
 from app.config import Settings
 from app.db import create_session_factory
 from app.formatters import format_share, format_voice_analysis
 from app.models import UserSettings, VoiceNote
-from app.openai_service import OpenAIService
 from app.tasks import normalize_tasks
 from app.voice_analysis import (
     normalize_voice_analysis,
@@ -17,6 +14,7 @@ from app.voice_analysis import (
     voice_type,
     water_class,
 )
+from app.voice_metrics_service import build_voice_analysis
 
 
 class VoiceAnalysisTests(unittest.TestCase):
@@ -197,6 +195,9 @@ class VoiceAnalysisTests(unittest.TestCase):
             with session_factory() as session:
                 note = session.query(VoiceNote).one()
                 restored = parse_voice_analysis_json(note.voice_analysis_json, note.duration_seconds)
+            bind = session_factory.kw.get("bind")
+            if bind is not None:
+                bind.dispose()
 
             self.assertEqual(restored["meme"], "Голосовое стало подкастом.")
 
@@ -211,51 +212,34 @@ class VoiceAnalysisTests(unittest.TestCase):
 
         self.assertEqual(user.total_saved_seconds, 80)
 
-    def test_openai_analyze_returns_voice_analysis_and_safe_prompt(self) -> None:
-        captured = {}
+    def test_voice_metrics_are_calculated_locally(self) -> None:
+        analysis = build_voice_analysis(
+            transcript="короче надо купить молоко сыр хлеб и не забыть оплатить сервер",
+            duration_seconds=180,
+            summary="Купить продукты и оплатить сервер.",
+            tasks=[
+                {"text": "Купить молоко", "priority": False},
+                {"text": "Оплатить сервер", "priority": True},
+            ],
+            details="Есть список покупок и важная оплата.",
+            important_points=["Оплата сервера важна"],
+            voice_analysis_text={
+                "memorable_quote": "короче",
+                "verdict": "Суть выжила после вступления.",
+                "meme": "Голосовое могло быть списком, но выбрало драматургию.",
+            },
+        )
 
-        class FakeResponses:
-            def create(self, model, input):
-                captured["prompt"] = input
-                return SimpleNamespace(
-                    output_text=json.dumps(
-                        {
-                            "title": "Тест",
-                            "summary": "Кратко",
-                            "tasks": [],
-                            "details": "Детали",
-                            "important_points": [],
-                            "voice_analysis": {
-                                "meaningful_duration_seconds": 10,
-                                "water_percent": 80,
-                                "wordiness_score": 8,
-                                "quality_score": 4,
-                                "voice_type_level": 8,
-                                "water_level": 8,
-                                "verdict_level": 8,
-                                "memorable_quote": "короче",
-                                "verdict": "Суть нашлась.",
-                                "meme": "Голосовое начиналось как сообщение, но стало подкастом.",
-                            },
-                        },
-                        ensure_ascii=False,
-                    )
-                )
-
-        service = OpenAIService.__new__(OpenAIService)
-        service._client = SimpleNamespace(responses=FakeResponses())
-        service._text_model = "test-model"
-        service._with_rate_limit_retry = lambda request, label: request()
-
-        result = service.analyze("короче надо проверить бота", duration_seconds=60)
-
-        self.assertIn("voice_analysis", result)
-        self.assertEqual(result["voice_analysis"]["saved_seconds"], 50)
-        self.assertIn("жёсткий сарказм", captured["prompt"])
-        self.assertIn("без бережной душнины", captured["prompt"])
-        self.assertIn("бей по формату сообщения, а не по человеку", captured["prompt"])
-        self.assertIn("Нельзя: оскорблять человека как личность", captured["prompt"])
-        self.assertIn("Запрещено: унижения, личностные оскорбления", captured["prompt"])
+        self.assertEqual(analysis["duration_seconds"], 180)
+        self.assertGreaterEqual(analysis["water_percent"], 0)
+        self.assertLessEqual(analysis["water_percent"], 100)
+        self.assertEqual(
+            analysis["saved_seconds"],
+            analysis["duration_seconds"] - analysis["meaningful_duration_seconds"],
+        )
+        self.assertEqual(analysis["memorable_quote"], "короче")
+        self.assertEqual(analysis["verdict"], "Суть выжила после вступления.")
+        self.assertIn("драматургию", analysis["meme"])
 
 
 if __name__ == "__main__":
